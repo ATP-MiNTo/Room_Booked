@@ -9,7 +9,11 @@ import random
 model = YOLO("yolov8n.pt")
 
 # เปิดกล้อง
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
+
+# ตั้งค่าขนาดกล้อง (Full HD - maximum quality)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
 # โฟลเดอร์เก็บ ROI
 roi_dir = "roi_images"
@@ -64,7 +68,7 @@ while True:
         conf = float(box.conf[0])
 
         # class 0 = person
-        if cls == 0 and conf > 0.5:
+        if cls == 0 and conf > 0.4:
             person_count += 1
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             current_box = (x1, y1, x2, y2)
@@ -127,7 +131,7 @@ while True:
             
             # วาดกรอบ
             color = (0, 255, 0)
-            label = f"ID:{person_name} {conf:.2f}"
+            label = f"ID:{person_name} conf:{conf:.2f}"
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(frame, label, (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
@@ -136,7 +140,9 @@ while True:
     cv2.putText(frame, f"People: {person_count}", (20, 40),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-    cv2.imshow("YOLO Person Detection", frame)
+    # ย่อขนาดหน้าต่าง (display only)
+    display_frame = cv2.resize(frame, (1280, 720))
+    cv2.imshow("YOLO Person Detection", display_frame)
 
     # Check if window was closed
     if cv2.getWindowProperty("YOLO Person Detection", cv2.WND_PROP_VISIBLE) < 1:
