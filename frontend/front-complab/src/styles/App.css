@@ -1,0 +1,18 @@
+/* src/index.css หรือ src/App.css */
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+}
+
+/* ล้างขอบขาว และบังคับไม่ให้มี Scrollbar ที่ตัวแม่ */
+body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden; /* กุญแจสำคัญ: ห้ามเลื่อนหน้าจอหลัก */
+}
+
+/* ทำให้ทุกกล่องคิดขนาดรวมขอบ (แก้ปัญหา layout เพี้ยน) */
+* {
+  box-sizing: border-box;
+}
