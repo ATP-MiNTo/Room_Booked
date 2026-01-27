@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+*.pt
+roi_images/
+*.csv
