@@ -5,6 +5,7 @@ const Seat = ({ seatNumber, isSelected, isBooked, onClick }) => {
   let iconColor = "#555"; 
   if (isBooked) iconColor = "#ef4444";     
   else if (isSelected) iconColor = "#4CAF50"; 
+  // else if (notFreeNotBooked) iconColor = "#f7ff14";
 
   return (
     <div 

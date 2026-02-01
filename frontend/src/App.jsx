@@ -1,9 +1,9 @@
 // src/App.jsx
-import { useState, useMemo, useEffect } from 'react'; // ✅ เพิ่ม useEffect
+import { useState, useMemo, useEffect } from 'react';
 import SeatMap from './components/SeatMap';
 import ReservationForm from './components/ReservationForm';
 import TimeSelector from './components/TimeSelector';
-import { RiTimeFill, RiCalendarTodoFill } from "react-icons/ri"; // ✅ (Optional) เพิ่มไอคอนถ้าต้องการ
+import { RiTimeFill, RiCalendarTodoFill } from "react-icons/ri";
 import './styles/App.css'; 
 
 function App() {
@@ -11,10 +11,10 @@ function App() {
   const [startTime, setStartTime] = useState("08:30");
   const [endTime, setEndTime] = useState("09:30"); 
 
-  // ✅ 1. เพิ่ม State สำหรับนาฬิกา
+  // State สำหรับนาฬิกา
   const [now, setNow] = useState(new Date());
 
-  // ✅ 2. สั่งให้นาฬิกาเดินทุก 1 วินาที
+  // นาฬิกาเดินทุก 1 วินาที
   useEffect(() => {
     const timer = setInterval(() => {
       setNow(new Date());
@@ -31,9 +31,11 @@ function App() {
 
   const allTimeSlots = [ "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00" ];
 
-  const mockBookings = {
-    "08:30": ["1", "2"], "09:00": ["1", "2", "5"], "09:30": ["1", "8"], "10:00": ["10", "11"], "13:00": ["20", "21"], "18:00": ["29", "30"]
-  };
+  // const mockBookings = {
+  //   "08:30": ["1", "2"], "09:00": ["1", "2", "5"], "09:30": ["1", "8"], "10:00": ["10", "11"], "13:00": ["20", "21"], "18:00": ["29", "30"]
+  // };
+
+  const mockBookings = { };
 
   const getDisplayEndTime = (time) => {
     if (!time) return "";
@@ -85,7 +87,7 @@ function App() {
       {/* ฝั่งขวา */}
       <div style={{ flex: 3, padding: '30px', backgroundColor: 'white', boxShadow: '-5px 0 15px rgba(0,0,0,0.05)', zIndex: 10, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
         
-        {/* ✅ 3. ส่วนแสดงวันที่และเวลา (อยู่บนสุด) */}
+        {/* ส่วนแสดงวันที่และเวลา (อยู่บนสุด) */}
         <div style={{ 
             backgroundColor: '#2c3e50', 
             color: 'white', 

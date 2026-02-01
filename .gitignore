@@ -1,0 +1,29 @@
+# 1. Environment Variables (สำคัญที่สุด!)
+# ห้ามเอาไฟล์รหัสผ่านขึ้น GitHub เด็ดขาด
+.env
+.env.local
+
+# 2. Database Data
+# ไม่ต้องเอาไฟล์ข้อมูลในฐานข้อมูลขึ้น เพราะมันจะถูกสร้างใหม่ในเครื่องเพื่อนเอง
+data/postgres_db/
+data/
+
+# 3. Backend (Python)
+# ไม่เอา Virtual Environment และไฟล์แคชขยะ
+backend/venv/
+backend/.venv/
+**/__pycache__/
+*.pyc
+backend/.pytest_cache/
+
+# 4. Frontend (Node/React)
+# ไม่เอาโฟลเดอร์ Library ที่หนักเครื่อง (ให้เพื่อนไปกด npm install เอง)
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# 5. OS & IDE
+# ไฟล์ตั้งค่าส่วนตัวของ VS Code หรือไฟล์ขยะของระบบ
+.vscode/
+.DS_Store
+Thumbs.db
