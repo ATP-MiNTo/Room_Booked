@@ -1,18 +1,177 @@
-/* src/index.css หรือ src/App.css */
-:root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-}
+/* src/styles/App.css */
 
-/* ล้างขอบขาว และบังคับไม่ให้มี Scrollbar ที่ตัวแม่ */
-body {
-  margin: 0;
-  padding: 0;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden; /* กุญแจสำคัญ: ห้ามเลื่อนหน้าจอหลัก */
-}
-
-/* ทำให้ทุกกล่องคิดขนาดรวมขอบ (แก้ปัญหา layout เพี้ยน) */
-* {
+/* =========================================
+   1. ส่วน Mobile (พื้นฐาน) - คงเดิมไว้เพราะสวยแล้ว
+   ========================================= */
+.main-layout {
+  display: flex;
+  flex-direction: column;
+  width: 100%; /* ใช้ 100% แทน 100vw เพื่อกัน Scrollbar ดันจอ */
+  min-height: 100vh;
+  background-color: #f5f7fa;
+  overflow-y: auto;
+  overflow-x: hidden;
   box-sizing: border-box;
+}
+
+.layout-left {
+  width: 100%;
+  padding: 15px;
+  display: flex;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+/* กรอบขาวของแผนที่ (ในมือถือ) */
+.seat-map-wrapper {
+  background: white;
+  padding: 20px 10px;
+  border-radius: 15px;
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.layout-right {
+  margin: 0 15px 20px 15px;
+  padding: 20px;
+  background-color: white;
+  border-radius: 15px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  box-sizing: border-box;
+}
+
+/* --- SeatMap Styles --- */
+.seat-map-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.screen-label {
+  margin-bottom: 25px;
+  padding: 8px 20px;
+  background-color: #333;
+  color: white;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  text-align: center;
+  max-width: 90%;
+}
+
+.banks-wrapper {
+  display: flex;
+  justify-content: center;
+  gap: clamp(20px, 8vw, 60px); 
+}
+
+.seat-bank {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(4px, 1.5vw, 10px); 
+}
+
+.seat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 12vw; 
+  max-width: 55px;
+  aspect-ratio: 1 / 1;
+}
+
+.seat-icon {
+  width: 100%;
+  height: auto;
+}
+
+.seat-number {
+  margin-top: 2px;
+  font-size: clamp(12px, 3vw, 16px);
+  font-weight: bold;
+  color: #333;
+}
+
+
+/* =========================================
+   2. ส่วน Desktop (ใช้สูตรเก่า Flex 7 : 3)
+   ========================================= */
+@media (min-width: 768px) { 
+  
+  .main-layout {
+    flex-direction: row; /* เรียงซ้าย-ขวา */
+    height: 100vh;       /* เต็มจอ */
+    overflow: hidden;    /* ล็อกหน้าจอหลัก */
+  }
+
+  /* --- ฝั่งซ้าย: ผังที่นั่ง (70%) --- */
+  .layout-left {
+    /* ใช้สูตรเดิมที่คุณชอบ คือแบ่งพื้นที่ 7 ส่วน */
+    flex: 7; 
+    
+    height: 100%;
+    overflow-y: auto;
+    background-color: #f5f7fa;
+    display: flex;
+    align-items: center; 
+    justify-content: center;
+    padding: 20px;
+  }
+
+  /* ทำให้พื้นหลังแผนที่ใส (ไม่มีกรอบขาวในคอม) */
+  .seat-map-wrapper {
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+
+  /* --- ฝั่งขวา: Sidebar ฟอร์ม (30%) --- */
+  .layout-right {
+    /* ใช้สูตรเดิมที่คุณชอบ คือแบ่งพื้นที่ 3 ส่วน */
+    flex: 3;
+    
+    /* ตั้งค่า Min-Width ไว้หน่อย กันกรณีจอมันเล็กเกินไปแล้วฟอร์มเบี้ยว */
+    min-width: 320px; 
+    
+    height: 100%;
+    overflow-y: auto;
+    
+    /* รีเซ็ตค่า Mobile ให้เป็น Sidebar ติดขอบ */
+    margin: 0 !important; 
+    border-radius: 0 !important; 
+    box-shadow: -5px 0 15px rgba(0,0,0,0.05) !important;
+    
+    padding: 30px !important; 
+    background-color: white !important;
+    z-index: 10;
+  }
+
+  /* --- ขนาดต่างๆ ของ Desktop --- */
+  .banks-wrapper {
+    gap: 100px; 
+  }
+
+  .seat-bank {
+    gap: 15px; 
+  }
+
+  .seat-item {
+    width: 60px;
+    max-width: none;
+  }
+  
+  .seat-number {
+    font-size: 20px;
+  }
+  
+  .screen-label {
+    font-size: 1rem;
+    padding: 10px 30px;
+  }
 }
