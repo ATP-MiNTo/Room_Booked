@@ -1,0 +1,15 @@
+<!-- Original quick notes / install steps (moved from README) -->
+<!-- For Face detection -->
+python -m venv .venv
+
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+.venv\Scripts\activate
+
+python install_deps.py
+
+--One below--
+.venv/Scripts/python.exe yolo8.py
+.venv/Scripts/python.exe yolo8_4cam.py
+
+<!-- ~~~~~~~~~~ -->
