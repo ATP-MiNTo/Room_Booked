@@ -1,3 +1,4 @@
+<!-- For Face detection -->
 python -m venv .venv
 
 .venv\Scripts\activate
@@ -5,3 +6,5 @@ python -m venv .venv
 pip install -r requirements.txt
 
 .venv/Scripts/python.exe yolo8.py
+
+<!-- ~~~~~~~~~~ -->
