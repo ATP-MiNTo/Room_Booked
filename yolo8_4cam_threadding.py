@@ -5,10 +5,11 @@ import torch
 import os
 import pandas as pd
 import random
+import threading
 
-# -----------------------
-# Configuration
-# -----------------------
+
+# -------------------------------------Configuration--------------------------------------------
+# Camera settings
 CAM_INDEXES = [0, 1, 2, 3]
 CAM_NAMES = {
     0: "Cam 0",
@@ -16,25 +17,52 @@ CAM_NAMES = {
     2: "Cam 2",
     3: "Cam 3",
 }
-FRAME_WIDTH = 1920
-FRAME_HEIGHT = 1080
-CONF_THRESHOLD = 0.4 # confidence threshold for person detection
+FRAME_WIDTH = 1280
+FRAME_HEIGHT = 720
+
+# Window display settings
+# lower resolution for better performance | Hide for best performance 
+SHOW_WINDOWS = "Hide" # Show or Hide
+Windows_width,Windows_height = 960,540
+
+# Detection settings
+CONF_THRESHOLD = 0.4 # minimum confidence threshold for person detection
 SAVE_INTERVAL_SEC = 10 # seconds between saving ROIs of the same person
-ENABLE_RESOURCE_MONITOR = True # set to True to enable resource monitoring (requires resource_monitor.py)
+
+# Tracking settings
+ENABLE_RESOURCE_MONITOR = False # set to True to enable resource monitoring (requires resource_monitor.py)
+
+# ----------------------------------------------------------------------------------------------
 
 # Load model once
 # choose device (use CUDA if available)
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# Detect CUDA availability and select an explicit device string (cuda:0) when available.
+cuda_available = torch.cuda.is_available()
+device = "cuda:0" if cuda_available else "cpu"
+print(f"CUDA available: {cuda_available}")
 print(f"Device selected: {device}")
 
 model = YOLO("yolov8n.pt")
 # move model to GPU if available
 try:
-    if device == "cuda":
-        # move the model to cuda (if supported by ultralytics API)
-        model.to("cuda")
+    if cuda_available:
+        try:
+            # prefer explicit torch.device
+            model.to(torch.device(device))
+            # if multiple GPUs are present, print device info
+            try:
+                print(f"torch.cuda.device_count() = {torch.cuda.device_count()}")
+                if torch.cuda.device_count() > 0:
+                    try:
+                        print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"Warning: failed to move model to {device}: {e}")
 except Exception:
-    # if model.to fails, continue and model will run on default device
+    # if anything unexpected happens, continue — model may still run on CPU
     pass
 
 # set model confidence threshold globally to reduce post-processing
@@ -132,21 +160,19 @@ print("ROIs saved every 10 seconds to roi_images/cam<idx>/<ID>/")
 print("Press 'q' to quit")
 print("===================================\n")
 
-try:
-    while True:
-        any_frame = False
 
-        for cam_idx, cam_data in cams.items():
+# --- Threaded camera processing ---
+def camera_thread_fn(cam_idx, cam_data, stop_event):
+    try:
+        while not stop_event.is_set():
             cap = cam_data["cap"]
             if not cap.isOpened():
-                continue
+                break
 
             frame_start = time.time()
             ret, frame = cap.read()
             if not ret:
-                continue
-
-            any_frame = True
+                break
 
             # increment per-camera frame counter and decide whether to run inference
             cam_data["frame_counter"] += 1
@@ -161,50 +187,40 @@ try:
                 # run inference (use AMP autocast if CUDA available)
                 inf_start = time.time()
                 try:
-                    if device == "cuda":
-                        # use the new amp API to avoid FutureWarning
-                        from torch import amp
-
-                        with amp.autocast(device_type="cuda"):
+                    try:
+                        if device.startswith("cuda") and cuda_available:
+                            from torch import amp
+                            with amp.autocast(device_type="cuda"):
+                                results = model(frame, verbose=False, device=device)
+                        else:
+                            results = model(frame, verbose=False, device=device)
+                    except Exception:
+                        try:
                             results = model(frame, verbose=False)
-                    else:
-                        results = model(frame, verbose=False)
+                        except Exception:
+                            raise
                 except Exception:
-                    # fallback to normal call if autocast or model call fails
                     results = model(frame, verbose=False)
                 inf_end = time.time()
-                # record inference timing
                 cam_data["inference_runs"] += 1
                 cam_data["total_inference_time_ms"] += (inf_end - inf_start) * 1000.0
 
-                # set first frame time if not set
                 if cam_data["first_frame_time"] is None:
                     cam_data["first_frame_time"] = frame_start
 
                 for box in results[0].boxes:
                     cls = int(box.cls[0])
                     conf = float(box.conf[0])
-
-                    # class 0 = person
                     if cls == 0 and conf > CONF_THRESHOLD:
                         person_count += 1
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         current_box = (x1, y1, x2, y2)
-
-                        # Match with tracked person
                         matched_id = match_box_to_person(current_box, cam_data["tracked_persons"])
-
                         if matched_id is not None:
-                            # Update box position
                             cam_data["tracked_persons"][matched_id]["last_box"] = current_box
-                            person_name = cam_data["tracked_persons"][matched_id].get(
-                                "name", f"Person {matched_id}"
-                            )
-
-                            # Check save interval
+                            person_name = cam_data["tracked_persons"][matched_id].get("name", f"Person {matched_id}")
                             current_time = time.time()
                             last_save = cam_data["tracked_persons"][matched_id].get("last_save", 0)
-
                             if person_name != f"Person {matched_id}" and current_time - last_save >= SAVE_INTERVAL_SEC:
                                 roi = frame[y1:y2, x1:x2]
                                 if roi.size > 0:
@@ -212,34 +228,24 @@ try:
                                     filename = f"ID{person_name}_{int(current_time)}.jpg"
                                     filepath = os.path.join(person_folder, filename)
                                     cv2.imwrite(filepath, roi)
-
                                     cam_data["tracked_persons"][matched_id]["last_save"] = current_time
-
-                                    cam_data["logs"].append(
-                                        {
-                                            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                            "person_id": person_name,
-                                            "confidence": round(conf, 3),
-                                            "roi_file": filepath,
-                                        }
-                                    )
-                                    print(
-                                        f"{cam_data['name']}: Saved ID {person_name} at {time.strftime('%H:%M:%S')}"
-                                    )
+                                    cam_data["logs"].append({
+                                        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "person_id": person_name,
+                                        "confidence": round(conf, 3),
+                                        "roi_file": filepath,
+                                    })
+                                    print(f"{cam_data['name']}: Saved ID {person_name} at {time.strftime('%H:%M:%S')}")
                         else:
-                            # Create new person with random 3-digit ID
                             matched_id = cam_data["person_id_counter"]
                             cam_data["person_id_counter"] += 1
-
                             while True:
                                 random_id = f"{random.randint(0, 999):03d}"
                                 if random_id not in cam_data["used_ids"]:
                                     cam_data["used_ids"].add(random_id)
                                     break
-
                             person_folder = os.path.join(cam_data["roi_dir"], random_id)
                             os.makedirs(person_folder, exist_ok=True)
-
                             cam_data["tracked_persons"][matched_id] = {
                                 "name": random_id,
                                 "last_box": current_box,
@@ -248,100 +254,60 @@ try:
                             }
                             person_name = random_id
                             print(f"{cam_data['name']}: New person detected! Assigned ID: {random_id}")
-
-                        # Draw box
                         color = (0, 255, 0)
                         label = f"ID:{person_name} conf:{conf:.2f}"
                         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                        cv2.putText(
-                            frame,
-                            label,
-                            (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.5,
-                            color,
-                            2,
-                        )
-
-                # overlay people count onto full-size frame
-                cv2.putText(
-                    frame,
-                    f"People: {person_count}",
-                    (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (0, 0, 255),
-                    2,
-                )
-
-                # cache annotated full-size frame for display when skipping inference
+                        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                cv2.putText(frame, f"People: {person_count}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 cam_data["last_annotated_frame"] = frame.copy()
             else:
-                # skipping inference this frame - use cached annotated frame if available
                 if cam_data["last_annotated_frame"] is not None:
                     frame = cam_data["last_annotated_frame"].copy()
-                # If no cached annotated frame, proceed with current frame (no detection)
-                # and still show zero or previous people count (we don't change tracked_persons here)
-                cv2.putText(
-                    frame,
-                    f"People: {len(cam_data['tracked_persons'])}",
-                    (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (0, 0, 255),
-                    2,
-                )
+                cv2.putText(frame, f"People: {len(cam_data['tracked_persons'])}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-            # Compute FPS and latency (per-camera)
             frame_end = time.time()
             latency_ms = (frame_end - frame_start) * 1000.0
-            # aggregate performance
             cam_data["frames_seen"] += 1
             cam_data["total_latency_ms"] += latency_ms
-
             if cam_data["last_frame_time"] is not None:
                 dt = frame_end - cam_data["last_frame_time"]
                 if dt > 0:
                     cam_data["fps"] = 1.0 / dt
             cam_data["last_frame_time"] = frame_end
+            cv2.putText(frame, f"FPS: {cam_data['fps']:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+            cv2.putText(frame, f"Latency: {latency_ms:.1f} ms", (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+            if SHOW_WINDOWS == "Show":
+                display_frame = cv2.resize(frame, (Windows_width, Windows_height))
+                cv2.imshow(cam_data["window"], display_frame)
+                if cv2.getWindowProperty(cam_data["window"], cv2.WND_PROP_VISIBLE) < 1:
+                    break
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    stop_event.set()
+                    break
+            elif SHOW_WINDOWS == "Hide":
+                pass
+    except KeyboardInterrupt:
+        print(f"\nInterrupted by user (KeyboardInterrupt) in {cam_data['name']}")
 
-            cv2.putText(
-                frame,
-                f"FPS: {cam_data['fps']:.1f}",
-                (20, 80),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (255, 255, 0),
-                2,
-            )
-            cv2.putText(
-                frame,
-                f"Latency: {latency_ms:.1f} ms",
-                (20, 115),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (255, 255, 0),
-                2,
-            )
+# --- Start threads for each camera ---
+stop_event = threading.Event()
+threads = []
+for cam_idx, cam_data in cams.items():
+    t = threading.Thread(target=camera_thread_fn, args=(cam_idx, cam_data, stop_event), daemon=True)
+    t.start()
+    threads.append(t)
 
-            # Resize for display
-            display_frame = cv2.resize(frame, (1280, 720))
-            cv2.imshow(cam_data["window"], display_frame)
-
-            # Check if window closed
-            if cv2.getWindowProperty(cam_data["window"], cv2.WND_PROP_VISIBLE) < 1:
-                any_frame = False
-
-        # Exit if no cameras are producing frames
-        if not any_frame:
+# Wait for all threads to finish (or until any window is closed or 'q' is pressed)
+try:
+    while any(t.is_alive() for t in threads):
+        if stop_event.is_set():
             break
-
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
-            break
-
+        time.sleep(0.1)
 except KeyboardInterrupt:
     print("\nInterrupted by user (KeyboardInterrupt)")
+    stop_event.set()
+for t in threads:
+    t.join()
 
 # Release cameras and close windows
 for cam_data in cams.values():

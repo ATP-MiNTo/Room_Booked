@@ -1,2 +1,2 @@
 psutil
-pynvml
+nvidia-ml-py

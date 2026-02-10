@@ -9,7 +9,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 python install_deps.py
 
 --One below--
-.venv/Scripts/python.exe yolo8.py
-.venv/Scripts/python.exe yolo8_4cam.py
+.venv/Scripts/python.exe yolo8.py 
+.venv/Scripts/python.exe yolo8_4cam_threadding.py
 
 <!-- ~~~~~~~~~~ -->

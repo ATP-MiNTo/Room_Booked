@@ -8,22 +8,34 @@ import random
 # โหลดโมเดล
 model = YOLO("yolov8n.pt")
 
+# Camera configuration
+CAM_IDX = 3
+CAM_NAME = f"Cam {CAM_IDX}"
+
 # เปิดกล้อง
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(CAM_IDX)
 
 # ตั้งค่าขนาดกล้อง (Full HD - maximum quality)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
-# โฟลเดอร์เก็บ ROI
-roi_dir = "roi_images"
-os.makedirs(roi_dir, exist_ok=True)
+# --- Logging / output layout (match yolo8_4cam.py structure)
+LOG_BASE_DIR = "logs"
+ROI_BASE_DIR = os.path.join(LOG_BASE_DIR, "roi_images")
+LOG_CAM_DIR = os.path.join(LOG_BASE_DIR, f"cam{CAM_IDX}")
+ROI_CAM_DIR = os.path.join(ROI_BASE_DIR, f"cam{CAM_IDX}")
+
+os.makedirs(LOG_BASE_DIR, exist_ok=True)
+os.makedirs(ROI_BASE_DIR, exist_ok=True)
+os.makedirs(LOG_CAM_DIR, exist_ok=True)
+os.makedirs(ROI_CAM_DIR, exist_ok=True)
 
 # เก็บข้อมูล tracked persons: {person_id: {"name": str, "last_save": timestamp, "folder": path}}
 tracked_persons = {}
 person_id_counter = 0
 used_ids = set()  # เก็บ ID ที่ใช้แล้ว
 
+# logs will hold dicts with keys: time, person_id, confidence, roi_file
 logs = []
 
 def distance(box1, box2):
@@ -93,41 +105,41 @@ while True:
                         filename = f"ID{person_name}_{int(current_time)}.jpg"
                         filepath = os.path.join(person_folder, filename)
                         cv2.imwrite(filepath, roi)
-                        
+
                         tracked_persons[matched_id]["last_save"] = current_time
-                        
-                        # Log
+
+                        # Log (use same keys as yolo8_4cam.py)
                         logs.append({
                             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                             "person_id": person_name,
                             "confidence": round(conf, 3),
-                            "roi_file": filepath
+                            "roi_file": filepath,
                         })
-                        print(f"Saved: ID {person_name} at {time.strftime('%H:%M:%S')}")
+                        print(f"{CAM_NAME}: Saved: ID {person_name} at {time.strftime('%H:%M:%S')}")
             else:
                 # สร้าง person ใหม่พร้อม random ID
                 matched_id = person_id_counter
                 person_id_counter += 1
-                
+
                 # สุ่ม 3-digit ID ที่ยังไม่ซ้ำ
                 while True:
                     random_id = f"{random.randint(0, 999):03d}"
                     if random_id not in used_ids:
                         used_ids.add(random_id)
                         break
-                
-                # สร้างโฟลเดอร์
-                person_folder = os.path.join(roi_dir, random_id)
+
+                # สร้างโฟลเดอร์ (per-camera ROI dir)
+                person_folder = os.path.join(ROI_CAM_DIR, random_id)
                 os.makedirs(person_folder, exist_ok=True)
-                
+
                 tracked_persons[matched_id] = {
                     "name": random_id,
                     "last_box": current_box,
                     "last_save": 0,
-                    "folder": person_folder
+                    "folder": person_folder,
                 }
                 person_name = random_id
-                print(f"New person detected! Assigned ID: {random_id}")
+                print(f"{CAM_NAME}: New person detected! Assigned ID: {random_id}")
             
             # วาดกรอบ
             color = (0, 255, 0)

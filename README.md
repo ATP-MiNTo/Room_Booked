@@ -6,6 +6,7 @@ This repository provides examples for running YOLOv8 person detection on single 
 Files of interest
 - `yolo8.py` — single-camera detection example
 - `yolo8_4cam.py` — 4-camera detection with ROI saving, per-camera CSV logs and aggregated performance summary
+- `yolo8_4cam_threadding.py` — 4-camera detection using Python threading for parallel camera processing (recommended for I/O-bound workloads)
 - `resource_monitor.py` — optional background resource (CPU/RAM/GPU) monitor (disabled by default)
 - `install_deps.py` — adaptive installer that conditionally installs optional monitoring packages
 - `requirements.txt` — core dependencies
@@ -27,7 +28,7 @@ python install_deps.py
 ```
 
 Notes:
-- `install_deps.py` reads the `ENABLE_RESOURCE_MONITOR` flag in `yolo8_4cam.py`. If True, it installs optional monitoring packages from `requirements-optional.txt`. If False, it will attempt to uninstall them.
+- `install_deps.py` reads the `ENABLE_RESOURCE_MONITOR` flag in `yolo8_4cam.py` or `yolo8_4cam_threadding.py`. If True, it installs optional monitoring packages from `requirements-optional.txt`. If False, it will attempt to uninstall them.
 - If you prefer manual installation:
 
 ```powershell
@@ -43,16 +44,24 @@ Single camera:
 ```
 
 4-camera (ensure cameras are connected and accessible by the indices in `yolo8_4cam.py`):
+
 ```powershell
 .venv\Scripts\python.exe yolo8_4cam.py
 ```
 
+4-camera (threaded version, recommended for I/O-bound workloads):
+```powershell
+.venv\Scripts\python.exe yolo8_4cam_threadding.py
+```
+
 Configuration highlights
-- `yolo8_4cam.py` top section exposes a few variables to tune behavior:
+- `yolo8_4cam.py` and `yolo8_4cam_threadding.py` top section exposes a few variables to tune behavior:
   - `CAM_INDEXES`, `CAM_NAMES` — which capture devices to open
-  - `FRAME_WIDTH`, `FRAME_HEIGHT` — capture resolution (default 1920x1080)
+  - `FRAME_WIDTH`, `FRAME_HEIGHT` — capture resolution (default 1280x720)
   - `CONF_THRESHOLD` — detection confidence threshold
   - `process_every_n_frames` (per camera) — skip inference on some frames to improve throughput
+  - `SHOW_WINDOWS` — set to "Show" or "Hide" to enable/disable display windows (for best performance, use "Hide")
+  - `Windows_width`, `Windows_height` — display window resolution (default 960x540)
   - `ENABLE_RESOURCE_MONITOR` — enable/disable background resource monitoring
 
 Outputs
