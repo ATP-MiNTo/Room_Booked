@@ -11,7 +11,7 @@ const ReservationForm = ({ selectedSeat, startTime, displayEndTime, onConfirm })
   ];
 
   const [formData, setFormData] = useState({
-    studentId: '', firstName: '', lastname : '', major: ''
+    studentId: '', firstName: '', lastname : '', major: '', purpose: ''
   });
 
   const handleChange = (e) => {
@@ -90,6 +90,19 @@ const ReservationForm = ({ selectedSeat, startTime, displayEndTime, onConfirm })
                 <option key={index} value={majorName}>{majorName}</option>
               ))}
             </select>
+        </div>
+
+        <div>
+          <label style={labelStyle}>วัตถุประสงค์การใช้งาน</label>
+          <input 
+            type="text" 
+            name="purpose" 
+            required 
+            value={formData.purpose} 
+            onChange={handleChange} 
+            placeholder="เช่น ทำการบ้านวิชา XX111, ทำโปรเจค, ศึกษาเพิ่มเติม" 
+            style={inputStyle} 
+          />
         </div>
 
         <button type="submit" style={buttonStyle}>ยืนยันการจอง</button>

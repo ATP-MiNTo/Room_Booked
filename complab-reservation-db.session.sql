@@ -13,5 +13,6 @@ CREATE TABLE reservations (
     reservation_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     seat_no INTEGER NOT NULL,
     start_time TIMESTAMP NOT NULL,
-    end_time TIMESTAMP NOT NULL
+    end_time TIMESTAMP NOT NULL,
+    purpose TEXT NOT NULL
 );

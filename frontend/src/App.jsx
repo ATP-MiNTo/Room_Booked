@@ -72,7 +72,7 @@ function App() {
 
   // เมื่อกดยืนยันการจอง
   const handleConfirmReservation = (data) => {
-    alert(`ยืนยันการจอง!\n\nโต๊ะ: ${selectedSeat}\nเวลา: ${startTime} - ${getDisplayEndTime(endTime)}\nชื่อ: ${data.name}\nสาขา: ${data.major}`);
+    alert(`ยืนยันการจอง!\n\nโต๊ะ: ${selectedSeat}\nเวลา: ${startTime} - ${getDisplayEndTime(endTime)}\nชื่อ: ${data.firstName} ${data.lastname}\nสาขา: ${data.major}\nวัตถุประสงค์: ${data.purpose}`);
   };
 
   // --- 3. Render (ส่วนแสดงผล) ---
@@ -138,7 +138,7 @@ function App() {
         ) : (
           !selectedSeat && (
              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: '#aaa', textAlign: 'center', border: '2px dashed #eee', borderRadius: '12px', marginTop: '20px', padding: '20px' }}>
-               <div style={{ fontSize: '40px', marginBottom: '10px' }}>👈</div>
+               <div style={{ fontSize: '40px', marginBottom: '10px' }}></div>
                <div>
                   เลือกเวลาที่ต้องการ<br/>
                   และคลิกที่นั่งฝั่ง{window.innerWidth > 768 ? 'ซ้าย' : 'บน'}
