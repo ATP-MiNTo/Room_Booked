@@ -22,7 +22,7 @@ FRAME_HEIGHT = 720
 
 # Window display settings
 # lower resolution for better performance | Hide for best performance 
-SHOW_WINDOWS = "Hide" # Show or Hide
+SHOW_WINDOWS = "Show" # Show or Hide
 Windows_width,Windows_height = 960,540
 
 # Detection settings

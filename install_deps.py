@@ -20,7 +20,7 @@ import os
 ROOT = os.path.dirname(__file__)
 REQ_MAIN = os.path.join(ROOT, "requirements.txt")
 REQ_OPT = os.path.join(ROOT, "requirements-optional.txt")
-TARGET_FILE = os.path.join(ROOT, "yolo8_4cam.py")
+TARGET_FILE = os.path.join(ROOT, "yolo8_4cam_threadding.py")
 
 
 def read_enable_flag(path):

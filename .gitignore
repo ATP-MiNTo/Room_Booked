@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 *.pt
 roi_images/
-*.csv
+logs/cam*/
+logs/roi_images/
