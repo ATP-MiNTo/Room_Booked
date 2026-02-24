@@ -3,5 +3,8 @@ __pycache__/
 *.pyc
 *.pt
 roi_images/
-logs/cam*/
+logs/Back_left/
+logs/Back_right/
+logs/Front_left/
+logs/Front_right/
 logs/roi_images/

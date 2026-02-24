@@ -23,3 +23,14 @@ session_timestamp,cam_idx,cam_name,frames,total_runtime_s,avg_fps,avg_latency_ms
 2026-02-17 13:02:00,0,Cam 0,1248,43.9046356678009,28.43,22.8,625,9.5,5941.7,8,logs\cam0\people_with_conf_and_roi_Cam0_20260217_130244.csv,logs\roi_images\cam0
 2026-02-17 13:01:58,1,Cam 1,617,45.39215898513794,13.59,61.4,309,15.2,4709.3,7,logs\cam1\people_with_conf_and_roi_Cam1_20260217_130244.csv,logs\roi_images\cam1
 
+---- Threading | GPU | Fixed Pos----
+2026-02-24 13:51:09,0,Cam 0,17032,602.2814054489136,28.28,24.4,8517,20.9,178413.7,28,logs\cam0\people_with_conf_and_roi_Cam0_20260224_140112.csv,logs\roi_images\cam0,0,0,0.0,0,0
+2026-02-24 13:51:09,1,Cam 1,16915,602.2755393981934,28.09,23.9,8458,20.9,176735.6,13,logs\cam1\people_with_conf_and_roi_Cam1_20260224_140112.csv,logs\roi_images\cam1,0,0,0.0,0,0
+2026-02-24 13:51:09,2,Cam 2,16857,602.2765438556671,27.99,23.8,8429,21.2,178966.9,11,logs\cam2\people_with_conf_and_roi_Cam2_20260224_140112.csv,logs\roi_images\cam2,0,0,0.0,0,0
+2026-02-24 13:51:09,3,Cam 3,17007,602.2341961860657,28.24,24.3,8504,20.4,173568.1,20,logs\cam3\people_with_conf_and_roi_Cam3_20260224_140112.csv,logs\roi_images\cam3,0,0,0.0,0,0
+
+---- Threading | GPU | Fixed Pos | Cam named----
+2026-02-24 14:07:44,0,Front_right,14294,527.8577649593353,27.08,25.8,7148,24.4,174654.5,3,logs\Front_right\people_with_conf_and_roi_Front_right_20260224_141633.csv,logs\roi_images\Front_right,0,0,0.0,0,0
+2026-02-24 14:07:44,1,Front_left,14330,527.8577649593353,27.15,26.1,7166,24.8,177949.9,3,logs\Front_left\people_with_conf_and_roi_Front_left_20260224_141633.csv,logs\roi_images\Front_left,0,0,0.0,0,0
+2026-02-24 14:07:44,2,Back_left,14212,527.8854792118073,26.92,26.0,7107,24.6,174633.6,8,logs\Back_left\people_with_conf_and_roi_Back_left_20260224_141633.csv,logs\roi_images\Back_left,0,0,0.0,0,0
+2026-02-24 14:07:44,3,Back_right,14344,527.9008684158325,27.17,26.3,7173,24.7,177067.8,9,logs\Back_right\people_with_conf_and_roi_Back_right_20260224_141633.csv,logs\roi_images\Back_right,0,0,0.0,0,0

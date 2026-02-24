@@ -2,13 +2,13 @@
 install_deps.py
 
 Simple helper to install project dependencies.
-It inspects `yolo8_4cam.py` to see if `ENABLE_RESOURCE_MONITOR` is True.
+It inspects `yolo8_4cam_threadding.py` to see if `ENABLE_RESOURCE_MONITOR` is True.
 If resource monitoring is enabled it will also install packages listed in
 `requirements-optional.txt`. Otherwise it only installs the main
 `requirements.txt` packages.
 
-Usage:
-    python install_deps.py
+Usage (from project root):
+    python tool/install_deps.py
 
 This script calls pip via the current interpreter (sys.executable -m pip).
 """
@@ -17,9 +17,11 @@ import sys
 import subprocess
 import os
 
-ROOT = os.path.dirname(__file__)
-REQ_MAIN = os.path.join(ROOT, "requirements.txt")
-REQ_OPT = os.path.join(ROOT, "requirements-optional.txt")
+# Get project root (parent directory of tool/)
+TOOL_DIR = os.path.dirname(__file__)
+ROOT = os.path.dirname(TOOL_DIR)
+REQ_MAIN = os.path.join(TOOL_DIR, "requirements.txt")
+REQ_OPT = os.path.join(TOOL_DIR, "requirements-optional.txt")
 TARGET_FILE = os.path.join(ROOT, "yolo8_4cam_threadding.py")
 
 
@@ -90,7 +92,7 @@ def main():
 
     enabled = read_enable_flag(TARGET_FILE)
     if enabled is None:
-        print("Could not detect ENABLE_RESOURCE_MONITOR flag in yolo8_4cam.py; skipping optional deps.")
+        print("Could not detect ENABLE_RESOURCE_MONITOR flag in yolo8_4cam_threadding.py; skipping optional deps.")
         return
 
     if enabled:

@@ -6,7 +6,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 .venv\Scripts\activate
 
-python install_deps.py
+python .\tool\install_deps.py
 
 --One below--
 .venv/Scripts/python.exe yolo8.py 

@@ -6,16 +6,18 @@ import os
 import pandas as pd
 import random
 import threading
+import json
+import numpy as np
 
 
 # -------------------------------------Configuration--------------------------------------------
 # Camera settings
 CAM_INDEXES = [0, 1, 2, 3]
 CAM_NAMES = {
-    0: "Cam 0",
-    1: "Cam 1",
-    2: "Cam 2",
-    3: "Cam 3",
+    0: "Front_right",
+    1: "Front_left",
+    2: "Back_left",
+    3: "Back_right",
 }
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
@@ -28,6 +30,12 @@ Windows_width,Windows_height = 960,540
 # Detection settings
 CONF_THRESHOLD = 0.4 # minimum confidence threshold for person detection
 SAVE_INTERVAL_SEC = 10 # seconds between saving ROIs of the same person
+
+# PC ROI settings
+ENABLE_PC_ROI = True  # set to True to load ROI polygons and assign PCnum
+PC_DWELL_TIME_SEC = 3.0  # seconds a person must stay in PC area before tagging PCnum
+ROI_CONFIG_DIR = os.path.join("tool", "roi_config")
+CSV_SUFFIX = "_roi.csv"
 
 # Tracking settings
 ENABLE_RESOURCE_MONITOR = False # set to True to enable resource monitoring (requires resource_monitor.py)
@@ -78,56 +86,14 @@ LOG_BASE_DIR = "logs"
 ROI_BASE_DIR = os.path.join(LOG_BASE_DIR, "roi_images")
 PERF_SUMMARY_FILE = os.path.join(LOG_BASE_DIR, "performance_summary.csv")
 
-# Create base directories
-os.makedirs(LOG_BASE_DIR, exist_ok=True)
-os.makedirs(ROI_BASE_DIR, exist_ok=True)
 
-# Per-camera state
-cams = {}
-
-for cam_idx in CAM_INDEXES:
-    cap = cv2.VideoCapture(cam_idx)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-    cam_name = CAM_NAMES.get(cam_idx, f"Cam {cam_idx}")
-    cams[cam_idx] = {
-        "cap": cap,
-        "tracked_persons": {},
-        "person_id_counter": 0,
-        "used_ids": set(),
-        "logs": [],
-        "window": f"YOLO Person Detection ({cam_name})",
-        "roi_dir": os.path.join(ROI_BASE_DIR, f"cam{cam_idx}"),
-    "log_dir": os.path.join(LOG_BASE_DIR, f"cam{cam_idx}"),
-        "last_frame_time": None,
-        "fps": 0.0,
-        # process every N frames (1 = every frame). Increase to 2 or 3 to reduce inference load.
-        "process_every_n_frames": 2,
-        "frame_counter": 0,
-        # cache last annotated frame to display when skipping inference
-        "last_annotated_frame": None,
-        # performance tracking
-        "frames_seen": 0,
-        "total_latency_ms": 0.0,
-        "inference_runs": 0,
-        "total_inference_time_ms": 0.0,
-        "first_frame_time": None,
-        "name": cam_name
-    }
-    os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
-    os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
-
-# start resource monitor if enabled
-monitor_stop = None
-monitor_thread = None
-if ENABLE_RESOURCE_MONITOR:
-    try:
-        from resource_monitor import start_resource_monitor, stop_resource_monitor
-
-        monitor_stop, monitor_thread = start_resource_monitor(cams, device=device, sample_interval=1.0)
-        print("Resource monitor started")
-    except Exception as e:
-        print(f"Failed to start resource monitor: {e}")
+def to_safe_label(value):
+    """Convert a display label into a filesystem-safe name."""
+    cleaned = "".join((c if c.isalnum() or c in ("-", "_") else "_") for c in str(value).strip())
+    # collapse repeated underscores for cleaner paths
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    return cleaned.strip("_") or "unknown"
 
 
 def distance(box1, box2):
@@ -154,9 +120,104 @@ def match_box_to_person(box, tracked_persons):
     return matched_id
 
 
+def load_camera_rois(cam_label):
+    """Load PC ROI polygons from CSV for the given camera label."""
+    csv_path = os.path.join(ROI_CONFIG_DIR, f"{cam_label}{CSV_SUFFIX}")
+    if not os.path.exists(csv_path):
+        return []
+    try:
+        df = pd.read_csv(csv_path)
+        rois = []
+        for _, row in df.iterrows():
+            pc_name = row["pc_name"]
+            points = json.loads(row["points_json"])
+            rois.append({"pc_name": pc_name, "polygon": np.array(points, dtype=np.int32)})
+        return rois
+    except Exception as e:
+        print(f"Failed to load ROI from {csv_path}: {e}")
+        return []
+
+
+def point_in_polygon(point, polygon):
+    """Check if point is inside polygon using cv2.pointPolygonTest."""
+    return cv2.pointPolygonTest(polygon, point, False) >= 0
+
+
+def get_pc_for_box(box, rois):
+    """Return PC name if box center is inside any ROI polygon, else None."""
+    cx = (box[0] + box[2]) / 2
+    cy = (box[1] + box[3]) / 2
+    for roi in rois:
+        if point_in_polygon((cx, cy), roi["polygon"]):
+            return roi["pc_name"]
+    return None
+
+# Create base directories
+os.makedirs(LOG_BASE_DIR, exist_ok=True)
+os.makedirs(ROI_BASE_DIR, exist_ok=True)
+
+# Per-camera state
+cams = {}
+
+for cam_idx in CAM_INDEXES:
+    cap = cv2.VideoCapture(cam_idx)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+    cam_name = CAM_NAMES.get(cam_idx, f"Cam {cam_idx}")
+    cam_label = to_safe_label(cam_name)
+    
+    # load PC ROI polygons if enabled
+    pc_rois = []
+    if ENABLE_PC_ROI:
+        pc_rois = load_camera_rois(cam_label)
+        if pc_rois:
+            print(f"{cam_name}: loaded {len(pc_rois)} PC ROI(s)")
+    
+    cams[cam_idx] = {
+        "cap": cap,
+        "tracked_persons": {},
+        "person_id_counter": 0,
+        "used_ids": set(),
+        "logs": [],
+        "window": f"YOLO Person Detection ({cam_name})",
+        "roi_dir": os.path.join(ROI_BASE_DIR, cam_label),
+        "log_dir": os.path.join(LOG_BASE_DIR, cam_label),
+        "last_frame_time": None,
+        "fps": 0.0,
+        # process every N frames (1 = every frame). Increase to 2 or 3 to reduce inference load.
+        "process_every_n_frames": 2,
+        "frame_counter": 0,
+        # cache last annotated frame to display when skipping inference
+        "last_annotated_frame": None,
+        # performance tracking
+        "frames_seen": 0,
+        "total_latency_ms": 0.0,
+        "inference_runs": 0,
+        "total_inference_time_ms": 0.0,
+        "first_frame_time": None,
+        "name": cam_name,
+        "label": cam_label,
+        "pc_rois": pc_rois
+    }
+    os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
+    os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
+
+# start resource monitor if enabled
+monitor_stop = None
+monitor_thread = None
+if ENABLE_RESOURCE_MONITOR:
+    try:
+        from tool.resource_monitor import start_resource_monitor, stop_resource_monitor
+
+        monitor_stop, monitor_thread = start_resource_monitor(cams, device=device, sample_interval=1.0)
+        print("Resource monitor started")
+    except Exception as e:
+        print(f"Failed to start resource monitor: {e}")
+
+
 print("=== Auto ID Assignment (4 Cams) ===")
 print("Each detected person gets a random 3-digit ID automatically")
-print("ROIs saved every 10 seconds to roi_images/cam<idx>/<ID>/")
+print("ROIs saved every 10 seconds to roi_images/<CAM_NAME>/<ID>/")
 print("Press 'q' to quit")
 print("===================================\n")
 
@@ -215,25 +276,52 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                         person_count += 1
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         current_box = (x1, y1, x2, y2)
+                        
+                        # determine which PC this person is in
+                        current_pc = get_pc_for_box(current_box, cam_data["pc_rois"]) if ENABLE_PC_ROI else None
+                        
                         matched_id = match_box_to_person(current_box, cam_data["tracked_persons"])
                         if matched_id is not None:
-                            cam_data["tracked_persons"][matched_id]["last_box"] = current_box
-                            person_name = cam_data["tracked_persons"][matched_id].get("name", f"Person {matched_id}")
+                            pdata = cam_data["tracked_persons"][matched_id]
+                            pdata["last_box"] = current_box
+                            person_name = pdata.get("name", f"Person {matched_id}")
+                            
+                            # PC dwell-time tracking
+                            if current_pc:
+                                if pdata.get("current_pc") == current_pc:
+                                    # still in same PC, accumulate time
+                                    pass
+                                else:
+                                    # entered new PC, start timer
+                                    pdata["current_pc"] = current_pc
+                                    pdata["pc_enter_time"] = frame_start
+                                
+                                # check if threshold met
+                                dwell_time = frame_start - pdata.get("pc_enter_time", frame_start)
+                                if dwell_time >= PC_DWELL_TIME_SEC and pdata.get("assigned_pc") is None:
+                                    pdata["assigned_pc"] = current_pc
+                                    print(f"{cam_data['name']}: ID {person_name} tagged as {current_pc} (dwell {dwell_time:.1f}s)")
+                            else:
+                                # outside all PCs, reset
+                                pdata["current_pc"] = None
+                                pdata["pc_enter_time"] = None
+                            
                             current_time = time.time()
-                            last_save = cam_data["tracked_persons"][matched_id].get("last_save", 0)
+                            last_save = pdata.get("last_save", 0)
                             if person_name != f"Person {matched_id}" and current_time - last_save >= SAVE_INTERVAL_SEC:
                                 roi = frame[y1:y2, x1:x2]
                                 if roi.size > 0:
-                                    person_folder = cam_data["tracked_persons"][matched_id]["folder"]
+                                    person_folder = pdata["folder"]
                                     filename = f"ID{person_name}_{int(current_time)}.jpg"
                                     filepath = os.path.join(person_folder, filename)
                                     cv2.imwrite(filepath, roi)
-                                    cam_data["tracked_persons"][matched_id]["last_save"] = current_time
+                                    pdata["last_save"] = current_time
                                     cam_data["logs"].append({
                                         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                                         "person_id": person_name,
                                         "confidence": round(conf, 3),
                                         "roi_file": filepath,
+                                        "PCnum": pdata.get("assigned_pc"),
                                     })
                                     print(f"{cam_data['name']}: Saved ID {person_name} at {time.strftime('%H:%M:%S')}")
                         else:
@@ -251,6 +339,9 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                                 "last_box": current_box,
                                 "last_save": 0,
                                 "folder": person_folder,
+                                "current_pc": current_pc,
+                                "pc_enter_time": frame_start if current_pc else None,
+                                "assigned_pc": None,
                             }
                             person_name = random_id
                             print(f"{cam_data['name']}: New person detected! Assigned ID: {random_id}")
@@ -321,7 +412,7 @@ cv2.destroyAllWindows()
 if ENABLE_RESOURCE_MONITOR and monitor_stop is not None and monitor_thread is not None:
     try:
         # stop_resource_monitor is provided by resource_monitor module
-        from resource_monitor import stop_resource_monitor
+        from tool.resource_monitor import stop_resource_monitor
 
         stop_resource_monitor(monitor_stop, monitor_thread, timeout=2.0)
         print("Resource monitor stopped")
@@ -335,7 +426,7 @@ if ENABLE_RESOURCE_MONITOR and monitor_stop is not None and monitor_thread is no
 # Save logs per camera
 for cam_idx, cam_data in cams.items():
     df = pd.DataFrame(cam_data["logs"])
-    safe_name = "".join(c for c in cam_data["name"] if c.isalnum() or c in ("-", "_"))
+    safe_name = cam_data.get("label") or to_safe_label(cam_data.get("name", f"cam{cam_idx}"))
     # add a timestamp to the filename so multiple sessions are preserved
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     csv_filename = f"people_with_conf_and_roi_{safe_name or f'cam{cam_idx}'}_{timestamp}.csv"
