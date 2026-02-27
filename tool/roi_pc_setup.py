@@ -6,7 +6,7 @@ import numpy as np
 
 
 # -------------------------------------Configuration--------------------------------------------
-# Camera settings (kept aligned with threading.py)
+# Camera settings (kept aligned with threaded.py)
 CAM_INDEXES = [0, 1, 2, 3]
 CAM_NAMES = {
     0: "Front_right",

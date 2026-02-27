@@ -10,6 +10,6 @@ python .\tool\install_deps.py
 
 --One below--
 .venv/Scripts/python.exe multiprocess.py 
-.venv/Scripts/python.exe threading.py
+.venv/Scripts/python.exe threaded.py
 
 <!-- ~~~~~~~~~~ -->

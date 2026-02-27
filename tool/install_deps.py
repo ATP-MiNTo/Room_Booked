@@ -2,7 +2,7 @@
 install_deps.py
 
 Simple helper to install project dependencies.
-It inspects `threading.py` to see if `ENABLE_RESOURCE_MONITOR` is True.
+It inspects `threaded.py` to see if `ENABLE_RESOURCE_MONITOR` is True.
 If resource monitoring is enabled it will also install packages listed in
 `requirements-optional.txt`. Otherwise it only installs the main
 `requirements.txt` packages.
@@ -22,7 +22,7 @@ TOOL_DIR = os.path.dirname(__file__)
 ROOT = os.path.dirname(TOOL_DIR)
 REQ_MAIN = os.path.join(TOOL_DIR, "requirements.txt")
 REQ_OPT = os.path.join(TOOL_DIR, "requirements-optional.txt")
-TARGET_FILE1 = os.path.join(ROOT, "threading.py")
+TARGET_FILE1 = os.path.join(ROOT, "threaded.py")
 TARGET_FILE2 = os.path.join(ROOT, "multiprocess.py")
 
 
@@ -94,7 +94,7 @@ def main():
     enabled1 = read_enable_flag(TARGET_FILE1)
     enabled2 = read_enable_flag(TARGET_FILE2)
     if enabled1 is None or enabled2 is None:
-        print("Could not detect ENABLE_RESOURCE_MONITOR flag in threading.py or multiprocess.py; skipping optional deps.")
+        print("Could not detect ENABLE_RESOURCE_MONITOR flag in threaded.py or multiprocess.py; skipping optional deps.")
         return
 
     enabled = enabled1 or enabled2
