@@ -160,9 +160,9 @@ def reserve_with_image(
         if cur.fetchone():
             raise HTTPException(status_code=409, detail="ที่นั่งนี้ถูกจองแล้ว")
 
-        # บันทึกแค่ตัวแปร filename ลงไปในช่อง image_path
+        
         cur.execute("""
-            INSERT INTO reservations (student_id, seat_no, start_time, end_time, purpose, image_path)
+            INSERT INTO reservations (student_id, seat_no, start_time, end_time, purpose, image_name)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (student_id, seat_id, start_naive, end_naive, purpose, filename))
 
@@ -191,7 +191,7 @@ def get_all_reservations():
 
     try:
         cur.execute("""
-            SELECT seat_no, start_time, end_time, image_path
+            SELECT seat_no, start_time, end_time, image_name
             FROM reservations
             ORDER BY start_time
         """)
