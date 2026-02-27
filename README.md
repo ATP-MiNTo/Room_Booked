@@ -21,8 +21,8 @@ YOLOv8-based multi-camera person detection system with automatic ID assignment, 
 
 ```
 Room_Booked/
-├── yolo8_4cam_threadding.py        # Threading-based detection (recommended)
-├── yolo8_4cam_multiprocessing.py   # Multiprocessing-based detection
+├── threading.py                    # Threading-based detection (recommended)
+├── multiprocess.py                 # Multiprocessing-based detection
 ├── yolov8n.pt                      # YOLOv8 nano model weights
 ├── README.md                       # This file
 ├── tool/                           # Utility scripts & configuration
@@ -101,12 +101,12 @@ python tool\roi_pc_setup.py
 
 **Threading version** (recommended for I/O-bound workloads):
 ```powershell
-python yolo8_4cam_threadding.py
+python threading.py
 ```
 
 **Multiprocessing version** (better CPU isolation):
 ```powershell
-python yolo8_4cam_multiprocessing.py
+python multiprocess.py
 ```
 
 Press `q` in any window or `Ctrl+C` to stop.
@@ -115,7 +115,7 @@ Press `q` in any window or `Ctrl+C` to stop.
 
 ## Configuration
 
-All configuration is at the top of `yolo8_4cam_threadding.py` and `yolo8_4cam_multiprocessing.py`:
+All configuration is at the top of `threading.py` and `multiprocess.py`:
 
 ### Camera Settings
 ```python

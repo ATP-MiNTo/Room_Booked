@@ -34,3 +34,8 @@ session_timestamp,cam_idx,cam_name,frames,total_runtime_s,avg_fps,avg_latency_ms
 2026-02-24 14:07:44,1,Front_left,14330,527.8577649593353,27.15,26.1,7166,24.8,177949.9,3,logs\Front_left\people_with_conf_and_roi_Front_left_20260224_141633.csv,logs\roi_images\Front_left,0,0,0.0,0,0
 2026-02-24 14:07:44,2,Back_left,14212,527.8854792118073,26.92,26.0,7107,24.6,174633.6,8,logs\Back_left\people_with_conf_and_roi_Back_left_20260224_141633.csv,logs\roi_images\Back_left,0,0,0.0,0,0
 2026-02-24 14:07:44,3,Back_right,14344,527.9008684158325,27.17,26.3,7173,24.7,177067.8,9,logs\Back_right\people_with_conf_and_roi_Back_right_20260224_141633.csv,logs\roi_images\Back_right,0,0,0.0,0,0
+
+2026-02-27 13:42:28,0,Front_right,18124,1774.2605817317963,10.21,83.9,9063,30.6,277474.2,7,logs\Front_right\people_with_conf_and_roi_Front_right_20260227_141204.csv,logs\roi_images\Front_right,0,0,0.0,0,0
+2026-02-27 13:42:28,1,Front_left,18088,1774.2901048660278,10.19,84.1,9045,30.2,273169.7,8,logs\Front_left\people_with_conf_and_roi_Front_left_20260227_141204.csv,logs\roi_images\Front_left,0,0,0.0,0,0
+2026-02-27 13:42:28,2,Back_left,18238,1774.3454856872559,10.28,83.4,9120,30.4,277454.8,21,logs\Back_left\people_with_conf_and_roi_Back_left_20260227_141204.csv,logs\roi_images\Back_left,0,0,0.0,0,0
+2026-02-27 13:42:28,3,Back_right,18120,1774.3255760669708,10.21,83.9,9061,30.5,276533.0,14,logs\Back_right\people_with_conf_and_roi_Back_right_20260227_141204.csv,logs\roi_images\Back_right,0,0,0.0,0,0
