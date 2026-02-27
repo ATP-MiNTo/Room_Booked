@@ -1,0 +1,100 @@
+/* src/styles/FaceScanner.css */
+
+.scanner-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* ลบ min-height: 100vh ทิ้งไป เพื่อไม่ให้ยืดเต็มจอ */
+  background-color: #ffffff; /* เปลี่ยนพื้นหลังเป็นกรอบสีขาว */
+  color: #333333; /* เปลี่ยนสีตัวหนังสือให้เข้มขึ้น */
+  padding: 30px 20px;
+  border-radius: 16px; /* ทำให้มุมกรอบหน้าต่างโค้งมน */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); /* เพิ่มเงาให้หน้าต่างดูลอยขึ้นมา */
+  font-family: 'Prompt', sans-serif; /* แนะนำให้ใช้ฟอนต์เดียวกับตัวเว็บ */
+}
+
+.scanner-wrapper {
+  position: relative;
+  width: 350px;
+  height: 450px;
+  overflow: hidden;
+  border-radius: 12px;
+  background-color: #000;
+  border: 4px solid #f0f0f0; /* เพิ่มเส้นขอบสีเทาอ่อนให้ตัวกล้องดูมีมิติ */
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+}
+
+.webcam-video, .captured-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1); /* สลับซ้ายขวาให้เหมือนกระจก */
+}
+
+.captured-image {
+  transform: none; /* รูปที่แคปแล้วไม่ต้องสลับ */
+}
+
+/* สร้างเลเยอร์ทับวีดีโอ แล้วเจาะรูตรงกลาง */
+.face-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.face-cutout {
+  width: 220px;
+  height: 320px;
+  border-radius: 50%; /* ทำให้เป็นวงรี */
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.7); /* เงาดำกลืนไปกับฉากหลัง */
+  border: 3px solid #00ff88; /* กรอบสีเขียว */
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { border-color: #00ff88; }
+  50% { border-color: #0088ff; }
+  100% { border-color: #00ff88; }
+}
+
+.status-box {
+  margin-top: 20px;
+  text-align: center;
+  min-height: 80px; /* จองพื้นที่ไว้ให้ข้อความและปุ่ม จะได้ไม่กระตุกตอนข้อความเปลี่ยน */
+}
+
+.status-box h3 {
+  margin-bottom: 15px;
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.success-text {
+  color: #28a745; /* สีเขียวตอนสแกนผ่าน */
+}
+
+.cancel-btn {
+  padding: 8px 30px;
+  background-color: #dc3545; /* สีแดงสำหรับปุ่มยกเลิก */
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.2s ease;
+}
+
+.cancel-btn:hover {
+  background-color: #c82333;
+}

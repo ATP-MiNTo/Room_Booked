@@ -6,6 +6,7 @@
 # 2. Database Data
 # ไม่ต้องเอาไฟล์ข้อมูลในฐานข้อมูลขึ้น เพราะมันจะถูกสร้างใหม่ในเครื่องเพื่อนเอง
 data/postgres_db/
+data/face_scanner/
 data/
 
 # 3. Backend (Python)

@@ -14,5 +14,17 @@ CREATE TABLE reservations (
     seat_no INTEGER NOT NULL,
     start_time TIMESTAMP NOT NULL,
     end_time TIMESTAMP NOT NULL,
-    purpose TEXT NOT NULL
+    purpose TEXT NOT NULL,
+    image_name TEXT
 );
+
+/*  
+    เพิ่มคอมลัมน์
+    ALTER TABLE reservations ADD COLUMN image_name TEXT;
+
+    ลบคอมลัมน์
+    ALTER TABLE reservations DROP COLUMN image_name;
+
+    ลบข้อมูล
+    TRUNCATE TABLE reservations, student_info RESTART IDENTITY CASCADE;
+*/
