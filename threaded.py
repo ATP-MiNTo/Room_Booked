@@ -29,7 +29,12 @@ Windows_width,Windows_height = 960,540
 
 # Detection settings
 CONF_THRESHOLD = 0.4 # minimum confidence threshold for person detection
+IOU_THRESHOLD = 0.4
 SAVE_INTERVAL_SEC = 10 # seconds between saving ROIs of the same person
+
+# Detection schedule settings (24-hour format, local time)
+DETECTION_START_HOUR_24 = 8   # start detection at 08:00
+DETECTION_END_HOUR_24 = 20    # stop detection at 20:00
 
 # PC ROI settings
 ENABLE_PC_ROI = True  # set to True to load ROI polygons and assign PCnum
@@ -77,6 +82,7 @@ except Exception:
 try:
     # some ultralytics versions expose a conf attribute
     model.conf = CONF_THRESHOLD
+    model.iou = IOU_THRESHOLD
 except Exception:
     # ignore if attribute not present
     pass
@@ -94,6 +100,23 @@ def to_safe_label(value):
     while "__" in cleaned:
         cleaned = cleaned.replace("__", "_")
     return cleaned.strip("_") or "unknown"
+
+
+def is_detection_time_active(current_time_struct=None):
+    """Return True when local time is inside the configured detection window."""
+    if current_time_struct is None:
+        current_time_struct = time.localtime()
+
+    current_hour = current_time_struct.tm_hour
+    start_hour = int(DETECTION_START_HOUR_24) % 24
+    end_hour = int(DETECTION_END_HOUR_24) % 24
+
+    # same start/end means full-day detection
+    if start_hour == end_hour:
+        return True
+    if start_hour < end_hour:
+        return start_hour <= current_hour < end_hour
+    return (current_hour >= start_hour) or (current_hour < end_hour)
 
 
 def distance(box1, box2):
@@ -189,6 +212,7 @@ for cam_idx in CAM_INDEXES:
         "frame_counter": 0,
         # cache last annotated frame to display when skipping inference
         "last_annotated_frame": None,
+        "detection_active_last": None,
         # performance tracking
         "frames_seen": 0,
         "total_latency_ms": 0.0,
@@ -218,6 +242,7 @@ if ENABLE_RESOURCE_MONITOR:
 print("=== Auto ID Assignment (4 Cams) ===")
 print("Each detected person gets a random 3-digit ID automatically")
 print("ROIs saved every 10 seconds to roi_images/<CAM_NAME>/<ID>/")
+print(f"YOLO detection schedule: {DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00 (local time)")
 print("Press 'q' to quit")
 print("===================================\n")
 
@@ -235,9 +260,21 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
             if not ret:
                 break
 
+            detection_active = is_detection_time_active()
+            last_detection_active = cam_data.get("detection_active_last")
+            if last_detection_active is None or last_detection_active != detection_active:
+                state = "ON" if detection_active else "OFF"
+                print(
+                    f"{cam_data['name']}: YOLO detection {state} "
+                    f"({DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00)"
+                )
+                cam_data["detection_active_last"] = detection_active
+                if not detection_active:
+                    cam_data["last_annotated_frame"] = None
+
             # increment per-camera frame counter and decide whether to run inference
             cam_data["frame_counter"] += 1
-            do_infer = (
+            do_infer = detection_active and (
                 (cam_data["frame_counter"] % cam_data["process_every_n_frames"] == 0)
                 or (cam_data["last_annotated_frame"] is None)
             )
@@ -352,9 +389,21 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 cv2.putText(frame, f"People: {person_count}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 cam_data["last_annotated_frame"] = frame.copy()
             else:
-                if cam_data["last_annotated_frame"] is not None:
-                    frame = cam_data["last_annotated_frame"].copy()
-                cv2.putText(frame, f"People: {len(cam_data['tracked_persons'])}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                if detection_active:
+                    if cam_data["last_annotated_frame"] is not None:
+                        frame = cam_data["last_annotated_frame"].copy()
+                    cv2.putText(frame, f"People: {len(cam_data['tracked_persons'])}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                else:
+                    cv2.putText(frame, "Detection: OFF (schedule)", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                    cv2.putText(
+                        frame,
+                        f"Active hours: {DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00",
+                        (20, 72),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 0, 255),
+                        2,
+                    )
 
             frame_end = time.time()
             latency_ms = (frame_end - frame_start) * 1000.0

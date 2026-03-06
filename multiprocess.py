@@ -29,7 +29,12 @@ Windows_width, Windows_height = 960, 540
 
 # Detection settings
 CONF_THRESHOLD = 0.4  # minimum confidence threshold for person detection
+IOU_THRESHOLD = 0.4
 SAVE_INTERVAL_SEC = 10  # seconds between saving ROIs of the same person
+
+# Detection schedule settings (24-hour format, local time)
+DETECTION_START_HOUR_24 = 8  # start detection at 08:00
+DETECTION_END_HOUR_24 = 20  # stop detection at 20:00
 
 # PC ROI settings
 ENABLE_PC_ROI = True  # set to True to load ROI polygons and assign PCnum
@@ -55,6 +60,23 @@ def to_safe_label(value):
     while "__" in cleaned:
         cleaned = cleaned.replace("__", "_")
     return cleaned.strip("_") or "unknown"
+
+
+def is_detection_time_active(current_time_struct=None):
+    """Return True when local time is inside the configured detection window."""
+    if current_time_struct is None:
+        current_time_struct = time.localtime()
+
+    current_hour = current_time_struct.tm_hour
+    start_hour = int(DETECTION_START_HOUR_24) % 24
+    end_hour = int(DETECTION_END_HOUR_24) % 24
+
+    # same start/end means full-day detection
+    if start_hour == end_hour:
+        return True
+    if start_hour < end_hour:
+        return start_hour <= current_hour < end_hour
+    return (current_hour >= start_hour) or (current_hour < end_hour)
 
 # Create base directories
 os.makedirs(LOG_BASE_DIR, exist_ok=True)
@@ -146,6 +168,7 @@ def init_model(conf_threshold):
 
     try:
         model.conf = conf_threshold
+        model.iou = IOU_THRESHOLD
     except Exception:
         pass
 
@@ -183,6 +206,7 @@ def camera_process_fn(cam_idx, stop_event):
     process_every_n_frames = 2
     frame_counter = 0
     last_annotated_frame = None
+    detection_active_last = None
 
     frames_seen = 0
     total_latency_ms = 0.0
@@ -219,8 +243,19 @@ def camera_process_fn(cam_idx, stop_event):
             if not ret:
                 break
 
+            detection_active = is_detection_time_active()
+            if detection_active_last is None or detection_active_last != detection_active:
+                state = "ON" if detection_active else "OFF"
+                print(
+                    f"{cam_name}: YOLO detection {state} "
+                    f"({DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00)"
+                )
+                detection_active_last = detection_active
+                if not detection_active:
+                    last_annotated_frame = None
+
             frame_counter += 1
-            do_infer = (frame_counter % process_every_n_frames == 0) or (last_annotated_frame is None)
+            do_infer = detection_active and ((frame_counter % process_every_n_frames == 0) or (last_annotated_frame is None))
             person_count = 0
 
             if do_infer:
@@ -333,9 +368,21 @@ def camera_process_fn(cam_idx, stop_event):
                 cv2.putText(frame, f"People: {person_count}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 last_annotated_frame = frame.copy()
             else:
-                if last_annotated_frame is not None:
-                    frame = last_annotated_frame.copy()
-                cv2.putText(frame, f"People: {len(tracked_persons)}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                if detection_active:
+                    if last_annotated_frame is not None:
+                        frame = last_annotated_frame.copy()
+                    cv2.putText(frame, f"People: {len(tracked_persons)}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                else:
+                    cv2.putText(frame, "Detection: OFF (schedule)", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                    cv2.putText(
+                        frame,
+                        f"Active hours: {DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00",
+                        (20, 72),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 0, 255),
+                        2,
+                    )
 
             frame_end = time.time()
             latency_ms = (frame_end - frame_start) * 1000.0
@@ -445,6 +492,7 @@ if __name__ == "__main__":
     print("=== Auto ID Assignment (4 Cams) ===")
     print("Each detected person gets a random 3-digit ID automatically")
     print("ROIs saved every 10 seconds to roi_images/<CAM_NAME>/<ID>/")
+    print(f"YOLO detection schedule: {DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00 (local time)")
     print("Press 'q' to quit")
     print("===================================\n")
 
