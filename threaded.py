@@ -41,6 +41,7 @@ ENABLE_PC_ROI = True  # set to True to load ROI polygons and assign PCnum
 ENABLE_MONITOR_ROI = True  # set to True to load monitor ROI polygons and estimate PC ON/OFF
 PERSON_OVERLAP_DWELL_SEC = 10.0  # person overlap dwell threshold (seconds)
 PC_ON_NO_PERSON_DWELL_SEC = 300.0  # PC ON + no person overlap dwell threshold (5 minutes)
+LATEST_PERSON_FLAG_LOOKBACK_SEC = 900.0  # latest-person lookup window for reason "2" (15 minutes)
 MONITOR_ON_MEAN_THRESHOLD = 70.0  # mean grayscale threshold for monitor ON heuristic
 MONITOR_ON_STD_THRESHOLD = 12.0  # std-dev threshold for monitor ON heuristic
 MONITOR_STATE_STABLE_FRAMES = 3  # consecutive frames to stabilize ON/OFF state
@@ -198,11 +199,14 @@ def new_pc_state(pc_name):
         "person_present": False,
         "current_person_id": None,
         "last_person_id": None,
+        "last_person_seen_time": None,
         "overlap_start_time": None,
         "empty_since_time": None,
         "person_event_logged": False,
         "unattended_logged": False,
-        "available": True,
+        "reason1_logged_person_id": None,
+        # availability state: 0=available, 1=person+pc_off, 2=person+pc_on (or waiting while pc_on and empty<threshold)
+        "available": 0,
         "last_update_time": None,
     }
 
@@ -266,12 +270,12 @@ def update_pc_states_from_monitor(frame, monitor_rois, pc_states, now_ts):
             state["unattended_logged"] = False
             if not state.get("person_present"):
                 state["empty_since_time"] = now_ts
-                state["available"] = False
+                state["available"] = 2
         elif prev_pc_on and (not state["pc_on"]):
             state["unattended_logged"] = False
             state["empty_since_time"] = None
             if not state.get("person_present"):
-                state["available"] = True
+                state["available"] = 0
 
         state["last_update_time"] = now_ts
 
@@ -287,12 +291,30 @@ def update_pc_activity_events(cam_name, pc_states, pc_to_person, now_ts, pc_even
                 state["current_person_id"] = person_id
                 state["overlap_start_time"] = now_ts
                 state["person_event_logged"] = False
+                state["reason1_logged_person_id"] = None
 
             state["person_present"] = True
             state["last_person_id"] = person_id
+            state["last_person_seen_time"] = now_ts
             state["empty_since_time"] = None
             state["unattended_logged"] = False
-            state["available"] = False
+
+            if state.get("pc_on"):
+                state["available"] = 2
+                state["reason1_logged_person_id"] = None
+            else:
+                state["available"] = 1
+                if state.get("reason1_logged_person_id") != person_id:
+                    pc_unattended_logs.append(
+                        {
+                            "time": now_str,
+                            "user": person_id,
+                            "cam_name": cam_name,
+                            "pc_name": pc_name,
+                            "reason": "1",
+                        }
+                    )
+                    state["reason1_logged_person_id"] = person_id
 
             dwell = now_ts - (state.get("overlap_start_time") or now_ts)
             if dwell >= PERSON_OVERLAP_DWELL_SEC and not state.get("person_event_logged"):
@@ -323,30 +345,35 @@ def update_pc_activity_events(cam_name, pc_states, pc_to_person, now_ts, pc_even
                 state["overlap_start_time"] = None
                 state["empty_since_time"] = now_ts
                 state["person_event_logged"] = False
+                state["reason1_logged_person_id"] = None
             elif state.get("empty_since_time") is None:
                 state["empty_since_time"] = now_ts
 
             if state.get("pc_on"):
                 empty_dwell = now_ts - (state.get("empty_since_time") or now_ts)
                 if empty_dwell >= PC_ON_NO_PERSON_DWELL_SEC:
-                    state["available"] = True
-                    if state.get("last_person_id") and not state.get("unattended_logged"):
+                    state["available"] = 0
+                    last_person_seen_time = state.get("last_person_seen_time")
+                    has_recent_last_person = (
+                        state.get("last_person_id")
+                        and last_person_seen_time is not None
+                        and (now_ts - last_person_seen_time) <= LATEST_PERSON_FLAG_LOOKBACK_SEC
+                    )
+                    if has_recent_last_person and not state.get("unattended_logged"):
                         pc_unattended_logs.append(
                             {
                                 "time": now_str,
+                                "user": state.get("last_person_id"),
                                 "cam_name": cam_name,
                                 "pc_name": pc_name,
-                                "last_person_id": state.get("last_person_id"),
-                                "pc_on": True,
-                                "empty_dwell_sec": round(empty_dwell, 2),
-                                "reason": "PC_ON_NO_PERSON_OVERLAP_5MIN",
+                                "reason": "2",
                             }
                         )
                         state["unattended_logged"] = True
                 else:
-                    state["available"] = False
+                    state["available"] = 2
             else:
-                state["available"] = True
+                state["available"] = 0
                 state["unattended_logged"] = False
                 state["empty_since_time"] = None
 
@@ -401,7 +428,7 @@ def build_all_pc_state_rows(cams):
             state_by_pc[pc_name] = {
                 "pc_name": pc_name,
                 "pc_on": bool(state.get("pc_on")),
-                "availble": bool(state.get("available", False)),
+                "availble": int(state.get("available", 0)),
             }
 
     ordered_pc_names = sorted(state_by_pc.keys(), key=pc_name_sort_key)
@@ -412,6 +439,44 @@ def write_pc_state_csv(cams, csv_path):
     rows = build_all_pc_state_rows(cams)
     pc_state_df = pd.DataFrame(rows, columns=["pc_name", "pc_on", "availble"])
     pc_state_df.to_csv(csv_path, index=False)
+
+
+def current_day_tag(now_ts=None):
+    if now_ts is None:
+        now_ts = time.time()
+    return time.strftime("%Y%m%d", time.localtime(now_ts))
+
+
+def day_tag_from_time_text(time_text, fallback_day_tag):
+    text = str(time_text or "").strip()
+    if len(text) >= 10 and text[4:5] == "-" and text[7:8] == "-":
+        y, m, d = text[0:4], text[5:7], text[8:10]
+        if y.isdigit() and m.isdigit() and d.isdigit():
+            return f"{y}{m}{d}"
+    return fallback_day_tag
+
+
+def append_rows_to_daily_csv(rows, columns, output_dir, file_prefix, default_day_tag):
+    grouped_rows = {}
+    for row in rows or []:
+        row_time = row.get("time") if isinstance(row, dict) else None
+        day_tag = day_tag_from_time_text(row_time, default_day_tag)
+        grouped_rows.setdefault(day_tag, []).append(row)
+
+    if not grouped_rows:
+        grouped_rows[default_day_tag] = []
+
+    written_paths = []
+    os.makedirs(output_dir, exist_ok=True)
+
+    for day_tag in sorted(grouped_rows.keys()):
+        file_path = os.path.join(output_dir, f"{file_prefix}_{day_tag}.csv")
+        day_df = pd.DataFrame(grouped_rows[day_tag], columns=columns)
+        write_header = not os.path.exists(file_path)
+        day_df.to_csv(file_path, mode="a", index=False, header=write_header)
+        written_paths.append(file_path)
+
+    return written_paths
 
 
 def realtime_pc_state_writer(cams, csv_path, stop_event, interval_sec=1.0):
@@ -721,8 +786,8 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 
 # --- Start threads for each camera ---
 stop_event = threading.Event()
-session_tag = time.strftime("%Y%m%d_%H%M%S")
-pc_state_all_csv = os.path.join(LOG_BASE_DIR, f"pc_state_all_{session_tag}.csv")
+run_start_day_tag = current_day_tag()
+pc_state_all_csv = os.path.join(LOG_BASE_DIR, "pc_state_all.csv")
 
 pc_state_writer_thread = None
 if ENABLE_REALTIME_PC_STATE_CSV:
@@ -786,27 +851,45 @@ if ENABLE_RESOURCE_MONITOR and monitor_stop is not None and monitor_thread is no
 # Save logs per camera
 all_unattended_logs = []
 for cam_idx, cam_data in cams.items():
-    df = pd.DataFrame(cam_data["logs"])
     safe_name = cam_data.get("label") or to_safe_label(cam_data.get("name", f"cam{cam_idx}"))
-    csv_filename = f"people_with_conf_and_roi_{safe_name or f'cam{cam_idx}'}_{session_tag}.csv"
-    csv_path = os.path.join(cam_data.get("log_dir", LOG_BASE_DIR), csv_filename)
-    df.to_csv(csv_path, index=False)
+    people_file_prefix = f"people_with_conf_and_roi_{safe_name or f'cam{cam_idx}'}"
+    people_csv_paths = append_rows_to_daily_csv(
+        cam_data.get("logs", []),
+        ["time", "person_id", "confidence", "roi_file", "PCnum"],
+        cam_data.get("log_dir", LOG_BASE_DIR),
+        people_file_prefix,
+        run_start_day_tag,
+    )
+    primary_people_csv = people_csv_paths[-1] if people_csv_paths else ""
 
     # PC activity event log (USING_PC / NON_PC_ACTIVITY)
-    pc_event_df = pd.DataFrame(cam_data.get("pc_event_logs", []))
-    pc_event_csv = os.path.join(
+    event_file_prefix = f"pc_activity_events_{safe_name or f'cam{cam_idx}'}"
+    pc_event_csv_paths = append_rows_to_daily_csv(
+        cam_data.get("pc_event_logs", []),
+        ["time", "cam_name", "pc_name", "event_type", "person_id", "pc_on", "dwell_sec", "PCnum"],
         cam_data.get("log_dir", LOG_BASE_DIR),
-        f"pc_activity_events_{safe_name or f'cam{cam_idx}'}_{session_tag}.csv",
+        event_file_prefix,
+        run_start_day_tag,
     )
-    pc_event_df.to_csv(pc_event_csv, index=False)
+    primary_event_csv = pc_event_csv_paths[-1] if pc_event_csv_paths else ""
 
     # collect unattended/person-flag logs for one combined file in logs/
     all_unattended_logs.extend(cam_data.get("pc_unattended_logs", []))
 
     print(f"\n=== Session Summary ({cam_data['name']}) ===")
     print(f"Total unique persons detected: {len(cam_data['tracked_persons'])}")
-    print(f"Logs saved to {csv_path}")
-    print(f"PC activity events saved to {pc_event_csv}")
+    if len(people_csv_paths) == 1:
+        print(f"Logs saved to {primary_people_csv}")
+    else:
+        print(f"Logs saved to {len(people_csv_paths)} daily file(s): {people_csv_paths[0]} -> {people_csv_paths[-1]}")
+
+    if len(pc_event_csv_paths) == 1:
+        print(f"PC activity events saved to {primary_event_csv}")
+    else:
+        print(
+            f"PC activity events saved to {len(pc_event_csv_paths)} daily file(s): "
+            f"{pc_event_csv_paths[0]} -> {pc_event_csv_paths[-1]}"
+        )
     # performance summary
     frames = cam_data.get("frames_seen", 0)
     total_latency_ms = cam_data.get("total_latency_ms", 0.0)
@@ -844,7 +927,7 @@ for cam_idx, cam_data in cams.items():
             "avg_inference_ms": float(f"{avg_inference:.1f}"),
             "total_inference_ms": float(f"{total_inference_time_ms:.1f}"),
             "unique_persons": len(cam_data.get("tracked_persons", {})),
-            "log_csv": csv_path,
+            "log_csv": primary_people_csv,
             "roi_dir": cam_data.get("roi_dir"),
         }
 
@@ -874,13 +957,21 @@ for cam_idx, cam_data in cams.items():
         print(f"Failed to write performance summary for {cam_data.get('name')}: {e}")
 
 # write one combined person-flag CSV for all cameras under logs/
-all_unattended_csv = os.path.join(LOG_BASE_DIR, f"pc_unattended_flags_{session_tag}.csv")
-all_unattended_df = pd.DataFrame(
+all_unattended_csv_paths = append_rows_to_daily_csv(
     all_unattended_logs,
-    columns=["time", "cam_name", "pc_name", "last_person_id", "pc_on", "empty_dwell_sec", "reason"],
+    ["time", "user", "pc_name", "cam_name", "reason"],
+    LOG_BASE_DIR,
+    "pc_unattended_flags",
+    run_start_day_tag,
 )
-all_unattended_df.to_csv(all_unattended_csv, index=False)
-print(f"Combined unattended/person-flag CSV saved to {all_unattended_csv}")
+if len(all_unattended_csv_paths) == 1:
+    print(f"Combined unattended/person-flag CSV saved to {all_unattended_csv_paths[0]}")
+else:
+    print(
+        "Combined unattended/person-flag CSV saved to "
+        f"{len(all_unattended_csv_paths)} daily file(s): "
+        f"{all_unattended_csv_paths[0]} -> {all_unattended_csv_paths[-1]}"
+    )
 
 if ENABLE_REALTIME_PC_STATE_CSV:
     print(f"Realtime all-PC state CSV saved to {pc_state_all_csv}")

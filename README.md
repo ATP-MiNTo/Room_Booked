@@ -37,11 +37,11 @@ Room_Booked/
 ├── note.txt
 ├── logs/
 │   ├── performance_summary.csv
-│   ├── pc_state_all_YYYYMMDD_HHMMSS.csv
-│   ├── pc_unattended_flags_YYYYMMDD_HHMMSS.csv
+│   ├── pc_state_all.csv
+│   ├── pc_unattended_flags_YYYYMMDD.csv
 │   ├── {CameraName}/
-│   │   ├── people_with_conf_and_roi_{CameraName}_{session}.csv
-│   │   └── pc_activity_events_{CameraName}_{session}.csv
+│   │   ├── people_with_conf_and_roi_{CameraName}_YYYYMMDD.csv
+│   │   └── pc_activity_events_{CameraName}_YYYYMMDD.csv
 │   └── roi_images/{CameraName}/{PersonID}/...
 └── tool/
     ├── install_deps.py
@@ -158,27 +158,43 @@ Detection schedule gates YOLO inference only; camera capture and display loop st
 
 ### Per-camera detection log
 
-`logs/{CameraName}/people_with_conf_and_roi_{CameraName}_{session}.csv`
+`logs/{CameraName}/people_with_conf_and_roi_{CameraName}_YYYYMMDD.csv`
 
 Main columns: `time`, `person_id`, `confidence`, `roi_file`, `PCnum`
 
 ### Per-camera PC activity events
 
-`logs/{CameraName}/pc_activity_events_{CameraName}_{session}.csv`
+`logs/{CameraName}/pc_activity_events_{CameraName}_YYYYMMDD.csv`
 
 Main columns include: `time`, `cam_name`, `pc_name`, `event_type`, `person_id`, `pc_on`, `dwell_sec`, `PCnum`
 
 ### Combined unattended/person-flag log (all cameras)
 
-`logs/pc_unattended_flags_{session}.csv`
+`logs/pc_unattended_flags_YYYYMMDD.csv`
 
-Columns: `time`, `cam_name`, `pc_name`, `last_person_id`, `pc_on`, `empty_dwell_sec`, `reason`
+Columns: `time`, `user`, `pc_name`, `cam_name`, `reason`
+
+`reason` code mapping:
+
+- `1` = `Not booked` (person detected while PC is OFF)
+- `2` = `Not turn off` (PC stayed ON with no person for 5 minutes, latest person within 15 minutes)
 
 ### Realtime compact all-PC state (all cameras)
 
-`logs/pc_state_all_{session}.csv`
+`logs/pc_state_all.csv`
 
-Current schema: `pc_name`, `pc_on`, `availble`
+Current schema (realtime overwrite, no timestamp column): `pc_name`, `pc_on`, `availble`
+
+`availble` state mapping:
+
+- `0` = Available (`no person` + `pc off`, or `pc on` with `no person` for 5 minutes)
+- `1` = Not Available (`person` + `pc off`)
+- `2` = Not Available (`person` + `pc on`)
+
+Daily session behavior:
+
+- Files above use date-only session naming (`YYYYMMDD`).
+- If runtime spans midnight, records are appended into each corresponding day file.
 
 ### ROI image crops
 
