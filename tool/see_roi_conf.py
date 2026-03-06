@@ -8,7 +8,8 @@ import numpy as np
 
 
 ROI_CONFIG_DIR = os.path.join("tool", "roi_config")
-CSV_SUFFIX = "_roi.csv"
+SEAT_CSV_SUFFIX = "_roi.csv"
+MONITOR_CSV_SUFFIX = "_monitor_roi.csv"
 WINDOW_NAME = "ROI Config Viewer"
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
@@ -21,8 +22,9 @@ CAM_NAME_TO_INDEX = {
 }
 
 TEXT_COLOR = (255, 255, 255)
-POLY_COLOR = (0, 255, 0)
 TITLE_COLOR = (0, 255, 255)
+SEAT_POLY_COLOR = (0, 255, 0)
+MONITOR_POLY_COLOR = (255, 0, 255)
 
 
 def normalize_quad(points):
@@ -36,11 +38,13 @@ def normalize_quad(points):
     return [tl.astype(int).tolist(), tr.astype(int).tolist(), br.astype(int).tolist(), bl.astype(int).tolist()]
 
 
-def parse_cam_name_from_csv_path(csv_path):
+def parse_cam_name_and_type(csv_path):
     name = os.path.basename(csv_path)
-    if name.endswith(CSV_SUFFIX):
-        return name[: -len(CSV_SUFFIX)]
-    return os.path.splitext(name)[0]
+    if name.endswith(MONITOR_CSV_SUFFIX):
+        return name[: -len(MONITOR_CSV_SUFFIX)], "monitor"
+    if name.endswith(SEAT_CSV_SUFFIX):
+        return name[: -len(SEAT_CSV_SUFFIX)], "seat"
+    return os.path.splitext(name)[0], "unknown"
 
 
 def load_roi_csv(csv_path):
@@ -61,16 +65,53 @@ def load_roi_csv(csv_path):
 
 
 def discover_roi_setups():
-    pattern = os.path.join(ROI_CONFIG_DIR, f"*{CSV_SUFFIX}")
-    files = sorted(glob.glob(pattern))
+    seat_files = sorted(glob.glob(os.path.join(ROI_CONFIG_DIR, f"*{SEAT_CSV_SUFFIX}")))
+    monitor_files = sorted(glob.glob(os.path.join(ROI_CONFIG_DIR, f"*{MONITOR_CSV_SUFFIX}")))
 
-    setups = []
-    for csv_path in files:
-        cam_name = parse_cam_name_from_csv_path(csv_path)
+    # monitor files also match *{SEAT_CSV_SUFFIX}, remove them from seat list
+    monitor_file_set = set(monitor_files)
+    seat_files = [path for path in seat_files if path not in monitor_file_set]
+
+    setups = {}
+
+    for csv_path in seat_files:
+        cam_name, _ = parse_cam_name_and_type(csv_path)
         rois = load_roi_csv(csv_path)
-        if rois:
-            setups.append({"cam_name": cam_name, "csv_path": csv_path, "rois": rois})
-    return setups
+        if cam_name not in setups:
+            setups[cam_name] = {
+                "cam_name": cam_name,
+                "seat_rois": [],
+                "monitor_rois": [],
+                "seat_csv": None,
+                "monitor_csv": None,
+            }
+        setups[cam_name]["seat_rois"] = rois
+        setups[cam_name]["seat_csv"] = csv_path
+
+    for csv_path in monitor_files:
+        cam_name, _ = parse_cam_name_and_type(csv_path)
+        rois = load_roi_csv(csv_path)
+        if cam_name not in setups:
+            setups[cam_name] = {
+                "cam_name": cam_name,
+                "seat_rois": [],
+                "monitor_rois": [],
+                "seat_csv": None,
+                "monitor_csv": None,
+            }
+        setups[cam_name]["monitor_rois"] = rois
+        setups[cam_name]["monitor_csv"] = csv_path
+
+    ordered = list(setups.values())
+
+    def setup_sort_key(item):
+        cam_name = item["cam_name"]
+        if cam_name in CAM_NAME_TO_INDEX:
+            return (0, CAM_NAME_TO_INDEX[cam_name])
+        return (1, cam_name)
+
+    ordered.sort(key=setup_sort_key)
+    return ordered
 
 
 def open_camera(cam_name, fallback_index=0):
@@ -90,27 +131,54 @@ def draw_no_camera_screen(cam_name):
     return canvas
 
 
-def draw_overlay(frame, cam_name, rois, cam_idx, total):
+def draw_overlay(frame, setup, cam_idx, total):
     canvas = frame.copy()
+    cam_name = setup["cam_name"]
+    seat_rois = setup.get("seat_rois", [])
+    monitor_rois = setup.get("monitor_rois", [])
 
     cam_index = CAM_NAME_TO_INDEX.get(cam_name, "?")
-    header = f"Camera {cam_idx + 1}/{total}: {cam_name} (index {cam_index})"
-    cv2.putText(canvas, header, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, TITLE_COLOR, 2)
+    header = (
+        f"Camera {cam_idx + 1}/{total}: {cam_name} (index {cam_index}) | "
+        f"Seat ROI: {len(seat_rois)} | Monitor ROI: {len(monitor_rois)}"
+    )
+    cv2.putText(canvas, header, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, TITLE_COLOR, 2)
 
     help_text = "Keys: < Prev | > Next | q Quit"
     cv2.putText(canvas, help_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, TEXT_COLOR, 2)
 
     y = 90
-    for roi in rois:
-        ordered = normalize_quad(roi["points"])
-        poly = np.array(ordered, dtype=np.int32).reshape((-1, 1, 2))
-        cv2.polylines(canvas, [poly], True, POLY_COLOR, 2)
+    if seat_rois:
+        cv2.putText(canvas, "Seat ROI (green)", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, SEAT_POLY_COLOR, 2)
+        y += 24
+        for roi in seat_rois:
+            ordered = normalize_quad(roi["points"])
+            poly = np.array(ordered, dtype=np.int32).reshape((-1, 1, 2))
+            cv2.polylines(canvas, [poly], True, SEAT_POLY_COLOR, 2)
 
-        label_anchor = tuple(ordered[0])
-        cv2.putText(canvas, roi["pc_name"], label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.7, POLY_COLOR, 2)
+            label_anchor = tuple(ordered[0])
+            cv2.putText(canvas, roi["pc_name"], label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.65, SEAT_POLY_COLOR, 2)
 
-        cv2.putText(canvas, roi["pc_name"], (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 255, 200), 1)
-        y += 22
+            cv2.putText(canvas, roi["pc_name"], (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 255, 200), 1)
+            y += 20
+
+    if monitor_rois:
+        y += 10
+        cv2.putText(canvas, "Monitor ROI (magenta)", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, MONITOR_POLY_COLOR, 2)
+        y += 24
+        for roi in monitor_rois:
+            ordered = normalize_quad(roi["points"])
+            poly = np.array(ordered, dtype=np.int32).reshape((-1, 1, 2))
+            cv2.polylines(canvas, [poly], True, MONITOR_POLY_COLOR, 2)
+
+            label_anchor = tuple(ordered[0])
+            cv2.putText(canvas, roi["pc_name"], label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.65, MONITOR_POLY_COLOR, 2)
+
+            cv2.putText(canvas, roi["pc_name"], (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 255), 1)
+            y += 20
+
+    if not seat_rois and not monitor_rois:
+        cv2.putText(canvas, "No ROI found for this camera.", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.7, TEXT_COLOR, 2)
 
     return canvas
 
@@ -131,7 +199,12 @@ def main():
 
     print("Loaded ROI setups:")
     for i, setup in enumerate(setups, start=1):
-        print(f"  {i}. {setup['cam_name']} ({len(setup['rois'])} ROI) -> {setup['csv_path']}")
+        seat_count = len(setup.get("seat_rois", []))
+        monitor_count = len(setup.get("monitor_rois", []))
+        print(
+            f"  {i}. {setup['cam_name']} | seat={seat_count} monitor={monitor_count} "
+            f"| seat_csv={setup.get('seat_csv')} | monitor_csv={setup.get('monitor_csv')}"
+        )
 
     active_idx = 0
     cap = open_camera(setups[active_idx]["cam_name"], active_idx)
@@ -147,7 +220,7 @@ def main():
         else:
             frame = draw_no_camera_screen(setup["cam_name"])
 
-        canvas = draw_overlay(frame, setup["cam_name"], setup["rois"], active_idx, len(setups))
+        canvas = draw_overlay(frame, setup, active_idx, len(setups))
         cv2.imshow(WINDOW_NAME, canvas)
 
         key = cv2.waitKeyEx(1)

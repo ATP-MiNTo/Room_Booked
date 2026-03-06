@@ -39,3 +39,21 @@ session_timestamp,cam_idx,cam_name,frames,total_runtime_s,avg_fps,avg_latency_ms
 2026-02-27 13:42:28,1,Front_left,18088,1774.2901048660278,10.19,84.1,9045,30.2,273169.7,8,logs\Front_left\people_with_conf_and_roi_Front_left_20260227_141204.csv,logs\roi_images\Front_left,0,0,0.0,0,0
 2026-02-27 13:42:28,2,Back_left,18238,1774.3454856872559,10.28,83.4,9120,30.4,277454.8,21,logs\Back_left\people_with_conf_and_roi_Back_left_20260227_141204.csv,logs\roi_images\Back_left,0,0,0.0,0,0
 2026-02-27 13:42:28,3,Back_right,18120,1774.3255760669708,10.21,83.9,9061,30.5,276533.0,14,logs\Back_right\people_with_conf_and_roi_Back_right_20260227_141204.csv,logs\roi_images\Back_right,0,0,0.0,0,0
+
+2026-02-27 14:52:32,0,Front_right,6071,570.4403345584869,10.64,81.7,3036,31.7,96227.6,5,logs\Front_right\people_with_conf_and_roi_Front_right_20260227_150203.csv,logs\roi_images\Front_right,0,0,0.0,0,0
+2026-02-27 14:52:32,1,Front_left,6047,570.3639869689941,10.6,81.8,3024,31.1,94002.2,5,logs\Front_left\people_with_conf_and_roi_Front_left_20260227_150203.csv,logs\roi_images\Front_left,0,0,0.0,0,0
+2026-02-27 14:52:32,2,Back_left,6068,570.4232079982758,10.64,81.6,3035,30.6,92878.6,9,logs\Back_left\people_with_conf_and_roi_Back_left_20260227_150203.csv,logs\roi_images\Back_left,0,0,0.0,0,0
+
+2026-02-27 15:31:53,0,Front_right,222,16.88313889503479,13.15,65.8,112,20.6,2305.2,0,logs\Front_right\people_with_conf_and_roi_Front_right_20260227_153211.csv,logs\roi_images\Front_right,0,0,0.0,0,0
+2026-02-27 15:31:53,1,Front_left,217,16.884138822555542,12.85,66.6,109,22.8,2480.9,0,logs\Front_left\people_with_conf_and_roi_Front_left_20260227_153211.csv,logs\roi_images\Front_left,0,0,0.0,0,0
+2026-02-27 15:31:53,2,Back_left,257,16.85385036468506,15.25,55.1,129,26.2,3381.2,3,logs\Back_left\people_with_conf_and_roi_Back_left_20260227_153211.csv,logs\roi_images\Back_left,0,0,0.0,0,0
+2026-02-27 15:31:53,3,Back_right,217,16.867361307144165,12.87,67.5,109,22.2,2424.2,0,logs\Back_right\people_with_conf_and_roi_Back_right_20260227_153211.csv,logs\roi_images\Back_right,0,0,0.0,0,0
+
+2026-03-05 16:47:45,0,Front_right,1006,64.05900073051453,15.7,53.3,504,19.9,10034.3,0,logs\Front_right\people_with_conf_and_roi_Front_right_20260305_164850.csv,logs\roi_images\Front_right,0,0,0.0,0,0
+2026-03-05 16:47:45,1,Front_left,1012,64.06899905204773,15.8,52.9,507,20.1,10202.2,0,logs\Front_left\people_with_conf_and_roi_Front_left_20260305_164850.csv,logs\roi_images\Front_left,0,0,0.0,0,0
+2026-03-05 16:47:45,2,Back_left,1012,64.05199527740479,15.8,52.5,507,22.4,11366.7,5,logs\Back_left\people_with_conf_and_roi_Back_left_20260305_164850.csv,logs\roi_images\Back_left,0,0,0.0,0,0
+2026-03-05 16:47:45,3,Back_right,1004,64.0790023803711,15.67,53.2,503,21.8,10972.8,1,logs\Back_right\people_with_conf_and_roi_Back_right_20260305_164850.csv,logs\roi_images\Back_right,0,0,0.0,0,0
+2026-03-06 14:19:46,0,Front_right,4040,157.19508028030396,25.7,28.0,2021,12.0,24300.7,2,logs\Front_right\people_with_conf_and_roi_Front_right_20260306_142224.csv,logs\roi_images\Front_right,0,0,0.0,0,0
+2026-03-06 14:19:46,1,Front_left,4045,157.1960790157318,25.73,27.5,2023,14.9,30091.3,1,logs\Front_left\people_with_conf_and_roi_Front_left_20260306_142224.csv,logs\roi_images\Front_left,0,0,0.0,0,0
+2026-03-06 14:19:46,2,Back_left,4049,157.17211937904358,25.76,27.1,2025,13.3,26994.2,1,logs\Back_left\people_with_conf_and_roi_Back_left_20260306_142224.csv,logs\roi_images\Back_left,0,0,0.0,0,0
+2026-03-06 14:19:46,3,Back_right,4033,157.15181231498718,25.66,27.8,2017,14.3,28893.5,5,logs\Back_right\people_with_conf_and_roi_Back_right_20260306_142224.csv,logs\roi_images\Back_right,0,0,0.0,0,0
