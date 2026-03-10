@@ -1,68 +1,60 @@
-Room_Booked — YOLOv8 Multi-Camera Room/PC Usage Tracking
-=========================================================
+Room_Booked — YOLOv8 Room/PC Usage Tracking
+===========================================
 
-YOLOv8-based multi-camera person detection and workstation usage tracking.
+YOLOv8-based people detection with PC/seat usage logic for both live cameras and offline videos.
 
-## Maintenance Status
+## Current Status
 
-- **Actively maintained runtime:** `threaded.py`
-- **Legacy (not maintained):** `multiprocess.py`
-
-As the project scope increased, maintaining both threading and multiprocessing pipelines became too costly and inconsistent. We now standardize on `threaded.py` because it is the version currently validated and efficient for this project workflow.
+- Active live pipeline: `threaded.py`
+- Active offline pipeline: `tool/threaded_video_mode.py`
+- Main config source: `tool/threaded_config.yaml`
+- Legacy reference scripts are kept under `Bin/*.notuse`
 
 ---
 
-## Current Capabilities
+## What Is Implemented
 
-- Multi-camera person detection (default: 4 cameras)
-- Auto 3-digit person ID assignment
-- Seat ROI overlap tracking with dwell threshold
-- Monitor ROI ON/OFF heuristic per PC
-- PC activity events (`USING_PC` / `NON_PC_ACTIVITY`)
-- Unattended/person-flag detection (`PC ON + no person overlap` over threshold)
-- Realtime compact all-PC state CSV (`pc_name,pc_on,availble`)
-- Detection schedule gating (YOLO inference only)
+- Multi-source person detection (default up to 4 sources)
+- Auto 3-digit person ID assignment and ROI image snapshots
+- Seat ROI overlap tracking and dwell-based usage classification
+- Monitor ROI ON/OFF heuristic with stabilization frames
+- PC activity event logs (`USING_PC` / `NON_PC_ACTIVITY`)
+- Unattended/person-flag logic (`reason=1` / `reason=2`)
+- Realtime all-PC compact state CSV (`pc_name,pc_on,availble`)
+- Smoothed people counter (mode over time window)
+- Smoothed PC availability state (same mode-window idea)
+- Detection schedule gating (live mode)
 - Session performance summary logging
 
 ---
 
-## Project Structure
+## Project Layout (Relevant Files)
 
 ```text
 Room_Booked/
 ├── threaded.py
-├── multiprocess.py                 # legacy / not maintained
 ├── yolov8n.pt
 ├── README.md
-├── note.txt
 ├── logs/
-│   ├── performance_summary.csv
-│   ├── pc_state_all.csv
-│   ├── pc_unattended_flags_YYYYMMDD.csv
-│   ├── {CameraName}/
-│   │   ├── people_with_conf_and_roi_{CameraName}_YYYYMMDD.csv
-│   │   └── pc_activity_events_{CameraName}_YYYYMMDD.csv
-│   └── roi_images/{CameraName}/{PersonID}/...
+├── logs_video_mode/
+├── test_vid/
 └── tool/
-    ├── install_deps.py
+    ├── threaded_video_mode.py
+    ├── threaded_config.yaml
     ├── requirements.txt
-    ├── requirements-optional.txt
-    ├── resource_monitor.py
+    ├── install_deps.py
     ├── roi_pcseat_setup.py
     ├── roi_monitor_setup.py
     ├── roi_edit_setup.py
     ├── see_roi_conf.py
     └── roi_config/
-        ├── Front_right_roi.csv
-        ├── Front_right_monitor_roi.csv
-        └── ...
 ```
 
 ---
 
-## Quick Start (Windows PowerShell)
+## Setup (Windows PowerShell)
 
-### 1) Create and activate environment
+### 1) Create and activate venv
 
 ```powershell
 python -m venv .venv
@@ -72,165 +64,121 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ### 2) Install dependencies
 
-Recommended:
+```powershell
+pip install -r tool\requirements.txt
+```
+
+`tool/requirements.txt` includes `PyYAML` (required for config loading).
+
+Optional helper installer:
 
 ```powershell
 python tool\install_deps.py
 ```
 
-Manual:
-
-```powershell
-pip install -r tool\requirements.txt
-# Optional monitoring extras:
-# pip install -r tool\requirements-optional.txt
-```
-
 ### 3) Configure ROIs
-
-Seat ROI setup:
 
 ```powershell
 python tool\roi_pcseat_setup.py
-```
-
-Monitor ROI setup:
-
-```powershell
 python tool\roi_monitor_setup.py
-```
-
-Unified ROI editor:
-
-```powershell
 python tool\roi_edit_setup.py
-```
-
-Mode for `roi_edit_setup.py` is hardcoded at the top of the file using `EDIT_MODE` (`"pcseat"` or `"monitor"`; typo `"moniter"` is tolerated).
-
-ROI viewer (seat + monitor overlay):
-
-```powershell
 python tool\see_roi_conf.py
 ```
 
-### 4) Run detection (maintained pipeline)
+---
+
+## Configuration
+
+All runtime settings are managed in:
+
+- `tool/threaded_config.yaml`
+
+Main groups inside config:
+
+- Source/camera mapping
+- Frame/display settings
+- Detection thresholds
+- Live schedule hours
+- PC/monitor ROI thresholds
+- Smoothing and performance controls
+- Output/log paths
+- Video mode options
+
+Important smoothing key:
+
+- `SMOOTH_WINDOW_SEC` (default `5.0`)
+
+---
+
+## Run Live Camera Mode
 
 ```powershell
 python threaded.py
 ```
 
-Stop with `q` (window) or `Ctrl+C` (terminal).
+Notes:
+
+- Uses local-time schedule (`DETECTION_START_HOUR_24` → `DETECTION_END_HOUR_24`)
+- Stop with `q` (window) or `Ctrl+C` (terminal)
+- Outputs go under `LOG_BASE_DIR` (default `logs`)
 
 ---
 
-## Key Configuration (`threaded.py`)
+## Run Offline Video Mode
 
-Important values are at the top of `threaded.py`.
+```powershell
+python tool\threaded_video_mode.py
+```
 
-- Camera:
-  - `CAM_INDEXES = [0, 1, 2, 3]`
-  - `CAM_NAMES = {0: "Front_right", 1: "Front_left", 2: "Back_left", 3: "Back_right"}`
-- Detection:
-  - `CONF_THRESHOLD = 0.4`
-  - `IOU_THRESHOLD = 0.4`
-  - `SAVE_INTERVAL_SEC = 10`
-- Detection schedule:
-  - `DETECTION_START_HOUR_24 = 8`
-  - `DETECTION_END_HOUR_24 = 18`
-- ROI / PC state:
-  - `ENABLE_PC_ROI = True`
-  - `ENABLE_MONITOR_ROI = True`
-  - `PERSON_OVERLAP_DWELL_SEC = 10.0`
-  - `PC_ON_NO_PERSON_DWELL_SEC = 300.0`
-  - `MONITOR_ON_MEAN_THRESHOLD = 70.0`
-  - `MONITOR_ON_STD_THRESHOLD = 12.0`
-  - `MONITOR_STATE_STABLE_FRAMES = 3`
-- Realtime all-PC file:
-  - `ENABLE_REALTIME_PC_STATE_CSV = True`
-  - `REALTIME_PC_STATE_WRITE_INTERVAL_SEC = 1.0`
+Notes:
 
-Detection schedule gates YOLO inference only; camera capture and display loop still continue.
+- Reads files from `VIDEO_INPUT_DIR` (default `test_vid`)
+- Discovers videos by `VIDEO_GLOB_PATTERNS`
+- Uses video-time timestamps for event/state logs
+- Uses video filename stem for source label + per-source log naming
+- Outputs go under `VIDEO_LOG_BASE_DIR` (default `logs_video_mode`)
+
+For ROI reuse, keep video filenames aligned with ROI camera labels (example: `Front_right.mp4`, `Back_left.mp4`).
 
 ---
 
 ## Output Files
 
-### Per-camera detection log
+Per-source logs (live and video mode follow same structure under different root dirs):
 
-`logs/{CameraName}/people_with_conf_and_roi_{CameraName}_YYYYMMDD.csv`
+- `{LOG_ROOT}/{SourceName}/people_with_conf_and_roi_{SourceName}_YYYYMMDD.csv`
+- `{LOG_ROOT}/{SourceName}/pc_activity_events_{SourceName}_YYYYMMDD.csv`
+- `{LOG_ROOT}/pc_unattended_flags_YYYYMMDD.csv`
+- `{LOG_ROOT}/pc_state_all.csv` (realtime overwrite)
+- `{LOG_ROOT}/roi_images/{SourceName}/{PersonID}/...`
+- `{LOG_ROOT}/performance_summary.csv`
 
-Main columns: `time`, `person_id`, `confidence`, `roi_file`, `PCnum`
+Realtime compact state schema:
 
-### Per-camera PC activity events
+- `pc_name`, `pc_on`, `availble`
 
-`logs/{CameraName}/pc_activity_events_{CameraName}_YYYYMMDD.csv`
+`availble` mapping:
 
-Main columns include: `time`, `cam_name`, `pc_name`, `event_type`, `person_id`, `pc_on`, `dwell_sec`, `PCnum`
+- `0` = Available
+- `1` = Not available (`person + pc_off`)
+- `2` = Not available (`person + pc_on` / transitional state before unattended timeout)
 
-### Combined unattended/person-flag log (all cameras)
-
-`logs/pc_unattended_flags_YYYYMMDD.csv`
-
-Columns: `time`, `user`, `pc_name`, `cam_name`, `reason`
-
-`reason` code mapping:
-
-- `1` = `Not booked` (person detected while PC is OFF)
-- `2` = `Not turn off` (PC stayed ON with no person for 5 minutes, latest person within 15 minutes)
-
-### Realtime compact all-PC state (all cameras)
-
-`logs/pc_state_all.csv`
-
-Current schema (realtime overwrite, no timestamp column): `pc_name`, `pc_on`, `availble`
-
-`availble` state mapping:
-
-- `0` = Available (`no person` + `pc off`, or `pc on` with `no person` for 5 minutes)
-- `1` = Not Available (`person` + `pc off`)
-- `2` = Not Available (`person` + `pc on`)
-
-Daily session behavior:
-
-- Files above use date-only session naming (`YYYYMMDD`).
-- If runtime spans midnight, records are appended into each corresponding day file.
-
-### ROI image crops
-
-`logs/roi_images/{CameraName}/{PersonID}/ID{PersonID}_{timestamp}.jpg`
-
-### Performance summary
-
-`logs/performance_summary.csv`
+> Note: column name is currently `availble` (kept for compatibility with existing consumers).
 
 ---
 
-## ROI Configuration Reference
+## ROI Config Reference
 
-This section merges the previous `tool/roi_config/README.txt` content.
+Directory:
 
-### Directory
+- `tool/roi_config/`
 
-`tool/roi_config/`
+Naming:
 
-### Naming
+- Seat ROI: `{CameraOrSourceLabel}_roi.csv`
+- Monitor ROI: `{CameraOrSourceLabel}_monitor_roi.csv`
 
-- Seat ROI: `{CameraName}_roi.csv`
-- Monitor ROI: `{CameraName}_monitor_roi.csv`
-
-Example files:
-
-- `Front_right_roi.csv`
-- `Front_left_roi.csv`
-- `Back_left_roi.csv`
-- `Back_right_roi.csv`
-- `Front_right_monitor_roi.csv`
-- `Front_left_monitor_roi.csv`
-- `Back_left_monitor_roi.csv`
-- `Back_right_monitor_roi.csv`
-
-### CSV format (seat and monitor)
+CSV format:
 
 ```csv
 pc_name,points_json
@@ -238,21 +186,12 @@ PC1,"[[x1,y1], [x2,y2], [x3,y3], [x4,y4]]"
 PC2,"[[x1,y1], [x2,y2], [x3,y3], [x4,y4]]"
 ```
 
-Monitor ROI should reuse the same `pc_name` values as seat ROI to keep PC mapping consistent.
-
-### ROI editor controls (`tool/roi_edit_setup.py`)
-
-- `<` / `>` : rotate selected ROI row
-- `c` : clear selected ROI points
-- `n` / `m` : next / previous camera
-- `s` : save current camera CSV
-- `q` : exit editor
-- Mouse left click: place 4 points to replace selected ROI polygon
+Use matching `pc_name` values between seat and monitor ROI files.
 
 ---
 
-## Notes
+## Quick Notes
 
-- `multiprocess.py` remains in the repository as legacy reference only.
-- For all active development and deployment, use `threaded.py`.
-- Keep `CAM_NAMES` and ROI CSV filenames aligned.
+- For active work, use `threaded.py` and `tool/threaded_video_mode.py`.
+- Keep source labels and ROI filenames aligned.
+- Adjust behavior primarily through `tool/threaded_config.yaml`.

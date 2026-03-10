@@ -8,6 +8,7 @@ import random
 import threading
 import json
 import numpy as np
+import glob
 from collections import Counter, deque
 
 
@@ -60,6 +61,15 @@ DEFAULT_CONFIG = {
     "LOG_BASE_DIR": "logs",
     "ROI_IMAGES_SUBDIR": "roi_images",
     "PERF_SUMMARY_FILENAME": "performance_summary.csv",
+    # Video mode
+    "VIDEO_INPUT_DIR": "test_vid",
+    "VIDEO_GLOB_PATTERNS": ["*.mp4", "*.avi", "*.mov", "*.mkv"],
+    "VIDEO_MAX_SOURCES": 4,
+    "VIDEO_LOG_BASE_DIR": "logs_video_mode",
+    "VIDEO_ROI_IMAGES_SUBDIR": "roi_images",
+    "VIDEO_PERF_SUMMARY_FILENAME": "performance_summary.csv",
+    "VIDEO_REALTIME_PC_STATE_FILENAME": "pc_state_all.csv",
+    "VIDEO_TIME_FALLBACK_FPS": 30.0,
 }
 
 CONFIG_FILE_PATH = os.path.join("tool", "threaded_config.yaml")
@@ -156,11 +166,24 @@ REALTIME_PC_STATE_WRITE_INTERVAL_SEC = float(
 
 # Paths
 MODEL_PATH = str(CONFIG.get("MODEL_PATH", DEFAULT_CONFIG["MODEL_PATH"]))
-LOG_BASE_DIR = os.path.normpath(str(CONFIG.get("LOG_BASE_DIR", DEFAULT_CONFIG["LOG_BASE_DIR"])))
-ROI_BASE_DIR = os.path.join(LOG_BASE_DIR, str(CONFIG.get("ROI_IMAGES_SUBDIR", DEFAULT_CONFIG["ROI_IMAGES_SUBDIR"])))
+VIDEO_INPUT_DIR = os.path.normpath(str(CONFIG.get("VIDEO_INPUT_DIR", DEFAULT_CONFIG["VIDEO_INPUT_DIR"])))
+VIDEO_GLOB_PATTERNS = CONFIG.get("VIDEO_GLOB_PATTERNS", DEFAULT_CONFIG["VIDEO_GLOB_PATTERNS"])
+VIDEO_MAX_SOURCES = max(1, int(CONFIG.get("VIDEO_MAX_SOURCES", DEFAULT_CONFIG["VIDEO_MAX_SOURCES"])))
+VIDEO_LOG_BASE_DIR = os.path.normpath(str(CONFIG.get("VIDEO_LOG_BASE_DIR", DEFAULT_CONFIG["VIDEO_LOG_BASE_DIR"])))
+VIDEO_ROI_IMAGES_SUBDIR = str(CONFIG.get("VIDEO_ROI_IMAGES_SUBDIR", DEFAULT_CONFIG["VIDEO_ROI_IMAGES_SUBDIR"]))
+VIDEO_PERF_SUMMARY_FILENAME = str(
+    CONFIG.get("VIDEO_PERF_SUMMARY_FILENAME", DEFAULT_CONFIG["VIDEO_PERF_SUMMARY_FILENAME"])
+)
+VIDEO_REALTIME_PC_STATE_FILENAME = str(
+    CONFIG.get("VIDEO_REALTIME_PC_STATE_FILENAME", DEFAULT_CONFIG["VIDEO_REALTIME_PC_STATE_FILENAME"])
+)
+VIDEO_TIME_FALLBACK_FPS = float(CONFIG.get("VIDEO_TIME_FALLBACK_FPS", DEFAULT_CONFIG["VIDEO_TIME_FALLBACK_FPS"]))
+
+LOG_BASE_DIR = VIDEO_LOG_BASE_DIR
+ROI_BASE_DIR = os.path.join(LOG_BASE_DIR, VIDEO_ROI_IMAGES_SUBDIR)
 PERF_SUMMARY_FILE = os.path.join(
     LOG_BASE_DIR,
-    str(CONFIG.get("PERF_SUMMARY_FILENAME", DEFAULT_CONFIG["PERF_SUMMARY_FILENAME"])),
+    VIDEO_PERF_SUMMARY_FILENAME,
 )
 
 # ----------------------------------------------------------------------------------------------
@@ -214,6 +237,50 @@ def to_safe_label(value):
     return cleaned.strip("_") or "unknown"
 
 
+def format_video_timestamp(video_seconds):
+    safe_seconds = max(0.0, float(video_seconds))
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(safe_seconds))
+
+
+def format_video_clock(video_seconds):
+    safe_seconds = max(0.0, float(video_seconds))
+    total = int(safe_seconds)
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    seconds = total % 60
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def get_video_frame_time_seconds(cap, cam_data):
+    pos_msec = cap.get(cv2.CAP_PROP_POS_MSEC)
+    if pos_msec and pos_msec > 0:
+        video_seconds = float(pos_msec) / 1000.0
+    else:
+        frame_idx = float(cap.get(cv2.CAP_PROP_POS_FRAMES) or 0.0)
+        fps = float(cam_data.get("video_fps") or VIDEO_TIME_FALLBACK_FPS)
+        video_seconds = (frame_idx / fps) if fps > 0 else float(cam_data.get("video_last_ts", 0.0))
+
+    last_ts = cam_data.get("video_last_ts")
+    if last_ts is not None and video_seconds < last_ts:
+        video_seconds = float(last_ts)
+
+    cam_data["video_last_ts"] = float(video_seconds)
+    return float(video_seconds)
+
+
+def discover_video_paths(video_dir, patterns, max_sources):
+    unique_paths = set()
+    patterns_to_use = patterns if isinstance(patterns, list) and patterns else ["*.mp4", "*.avi", "*.mov", "*.mkv"]
+
+    for pattern in patterns_to_use:
+        for path in glob.glob(os.path.join(video_dir, str(pattern))):
+            if os.path.isfile(path):
+                unique_paths.add(os.path.normpath(path))
+
+    ordered = sorted(unique_paths)
+    return ordered[:max_sources]
+
+
 def update_mode_value(history, value, now_ts, window_sec):
     value_int = int(value)
     if window_sec <= 0:
@@ -252,20 +319,7 @@ def update_smoothed_person_count(cam_data, raw_count, now_ts):
 
 
 def is_detection_time_active(current_time_struct=None):
-    """Return True when local time is inside the configured detection window."""
-    if current_time_struct is None:
-        current_time_struct = time.localtime()
-
-    current_hour = current_time_struct.tm_hour
-    start_hour = int(DETECTION_START_HOUR_24) % 24
-    end_hour = int(DETECTION_END_HOUR_24) % 24
-
-    # same start/end means full-day detection
-    if start_hour == end_hour:
-        return True
-    if start_hour < end_hour:
-        return start_hour <= current_hour < end_hour
-    return (current_hour >= start_hour) or (current_hour < end_hour)
+    return True
 
 
 def distance(box1, box2):
@@ -421,7 +475,7 @@ def update_pc_states_from_monitor(frame, monitor_rois, pc_states, now_ts):
 
 
 def update_pc_activity_events(cam_name, pc_states, pc_to_person, now_ts, pc_event_logs, pc_unattended_logs):
-    now_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_ts))
+    now_str = format_video_timestamp(now_ts)
 
     for pc_name, state in pc_states.items():
         person_id = pc_to_person.get(pc_name)
@@ -519,7 +573,7 @@ def update_pc_activity_events(cam_name, pc_states, pc_to_person, now_ts, pc_even
 
 
 def build_pc_state_rows(cam_idx, cam_name, cam_label, pc_states, now_ts):
-    snapshot_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_ts))
+    snapshot_time = format_video_timestamp(now_ts)
     rows = []
     for pc_name in sorted(pc_states.keys()):
         state = pc_states[pc_name]
@@ -545,7 +599,7 @@ def build_pc_state_rows(cam_idx, cam_name, cam_label, pc_states, now_ts):
                 "monitor_mean": state.get("monitor_mean", 0.0),
                 "monitor_std": state.get("monitor_std", 0.0),
                 "last_update_time": (
-                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(state["last_update_time"]))
+                    format_video_timestamp(state["last_update_time"])
                     if state.get("last_update_time")
                     else ""
                 ),
@@ -640,12 +694,23 @@ os.makedirs(ROI_BASE_DIR, exist_ok=True)
 # Per-camera state
 cams = {}
 
-for cam_idx in CAM_INDEXES:
-    cap = cv2.VideoCapture(cam_idx)
+video_paths = discover_video_paths(VIDEO_INPUT_DIR, VIDEO_GLOB_PATTERNS, VIDEO_MAX_SOURCES)
+if not video_paths:
+    raise RuntimeError(f"No video files found in {VIDEO_INPUT_DIR} using patterns {VIDEO_GLOB_PATTERNS}")
+
+for cam_idx, video_path in enumerate(video_paths):
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"Skipping unreadable video: {video_path}")
+        continue
+
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-    cam_name = CAM_NAMES.get(cam_idx, f"Cam {cam_idx}")
+    cam_name = os.path.splitext(os.path.basename(video_path))[0]
     cam_label = to_safe_label(cam_name)
+    video_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    if video_fps <= 0:
+        video_fps = VIDEO_TIME_FALLBACK_FPS
     
     # load PC ROI polygons if enabled
     pc_rois = []
@@ -689,8 +754,13 @@ for cam_idx in CAM_INDEXES:
         "inference_runs": 0,
         "total_inference_time_ms": 0.0,
         "first_frame_time": None,
+        "first_video_time": None,
+        "last_video_time": None,
         "name": cam_name,
         "label": cam_label,
+        "source_path": video_path,
+        "video_fps": video_fps,
+        "video_last_ts": 0.0,
         "pc_rois": pc_rois,
         "monitor_rois": monitor_rois,
         "pc_states": pc_states,
@@ -699,6 +769,9 @@ for cam_idx in CAM_INDEXES:
     }
     os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
     os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
+
+if not cams:
+    raise RuntimeError(f"No readable videos found in {VIDEO_INPUT_DIR}")
 
 # start resource monitor if enabled
 monitor_stop = None
@@ -713,13 +786,17 @@ if ENABLE_RESOURCE_MONITOR:
         print(f"Failed to start resource monitor: {e}")
 
 
-print("=== Auto ID Assignment (4 Cams) ===")
+print("=== Auto ID Assignment (Video Mode) ===")
 print("Each detected person gets a random 3-digit ID automatically")
 print(f"ROIs saved every {SAVE_INTERVAL_SEC:.0f} seconds to roi_images/<CAM_NAME>/<ID>/")
-print(f"YOLO detection schedule: {DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00 (local time)")
+print(f"Video input directory: {VIDEO_INPUT_DIR}")
+print("Detection runs continuously (schedule disabled in video mode)")
 print(f"Person overlap dwell threshold: {PERSON_OVERLAP_DWELL_SEC:.0f}s")
 print(f"PC ON + no person unattended threshold: {PC_ON_NO_PERSON_DWELL_SEC/60:.0f} minutes")
 print(f"Smoothing window (mode): {SMOOTH_WINDOW_SEC:.1f}s")
+print(f"Logs root: {LOG_BASE_DIR}")
+for cam_data in cams.values():
+    print(f"- {cam_data['name']} <= {cam_data['source_path']}")
 print("Press 'q' to quit")
 print("===================================\n")
 
@@ -732,18 +809,22 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
             if not cap.isOpened():
                 break
 
-            frame_start = time.time()
+            loop_wall_start = time.time()
             ret, frame = cap.read()
             if not ret:
                 break
+
+            frame_time_sec = get_video_frame_time_seconds(cap, cam_data)
+            if cam_data.get("first_video_time") is None:
+                cam_data["first_video_time"] = frame_time_sec
+            cam_data["last_video_time"] = frame_time_sec
 
             detection_active = is_detection_time_active()
             last_detection_active = cam_data.get("detection_active_last")
             if last_detection_active is None or last_detection_active != detection_active:
                 state = "ON" if detection_active else "OFF"
                 print(
-                    f"{cam_data['name']}: YOLO detection {state} "
-                    f"({DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00)"
+                    f"{cam_data['name']}: YOLO detection {state} (video-time mode)"
                 )
                 cam_data["detection_active_last"] = detection_active
                 if not detection_active:
@@ -781,7 +862,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 cam_data["total_inference_time_ms"] += (inf_end - inf_start) * 1000.0
 
                 if cam_data["first_frame_time"] is None:
-                    cam_data["first_frame_time"] = frame_start
+                    cam_data["first_frame_time"] = loop_wall_start
 
                 pc_to_person = {}
 
@@ -810,10 +891,10 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                                 else:
                                     # entered new PC, start timer
                                     pdata["current_pc"] = current_pc
-                                    pdata["pc_enter_time"] = frame_start
+                                    pdata["pc_enter_time"] = frame_time_sec
                                 
                                 # check if threshold met
-                                dwell_time = frame_start - pdata.get("pc_enter_time", frame_start)
+                                dwell_time = frame_time_sec - pdata.get("pc_enter_time", frame_time_sec)
                                 if dwell_time >= PERSON_OVERLAP_DWELL_SEC:
                                     pc_state = cam_data.get("pc_states", {}).get(current_pc, {})
                                     if pc_state.get("pc_on"):
@@ -826,24 +907,24 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                                 pdata["pc_enter_time"] = None
                                 pdata["assigned_pc"] = None
                             
-                            current_time = time.time()
+                            current_time = frame_time_sec
                             last_save = pdata.get("last_save", 0)
                             if person_name != f"Person {matched_id}" and current_time - last_save >= SAVE_INTERVAL_SEC:
                                 roi = frame[y1:y2, x1:x2]
                                 if roi.size > 0:
                                     person_folder = pdata["folder"]
-                                    filename = f"ID{person_name}_{int(current_time)}.jpg"
+                                    filename = f"ID{person_name}_{int(current_time * 1000)}.jpg"
                                     filepath = os.path.join(person_folder, filename)
                                     cv2.imwrite(filepath, roi)
                                     pdata["last_save"] = current_time
                                     cam_data["logs"].append({
-                                        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "time": format_video_timestamp(frame_time_sec),
                                         "person_id": person_name,
                                         "confidence": round(conf, 3),
                                         "roi_file": filepath,
                                         "PCnum": pdata.get("assigned_pc"),
                                     })
-                                    print(f"{cam_data['name']}: Saved ID {person_name} at {time.strftime('%H:%M:%S')}")
+                                    print(f"{cam_data['name']}: Saved ID {person_name} at {format_video_clock(current_time)}")
                         else:
                             matched_id = cam_data["person_id_counter"]
                             cam_data["person_id_counter"] += 1
@@ -860,7 +941,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                                 "last_save": 0,
                                 "folder": person_folder,
                                 "current_pc": current_pc,
-                                "pc_enter_time": frame_start if current_pc else None,
+                                "pc_enter_time": frame_time_sec if current_pc else None,
                                 "assigned_pc": None,
                             }
                             person_name = random_id
@@ -876,12 +957,12 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                                 pc_to_person[current_pc] = (conf, person_name)
 
                 pc_to_person_map = {pc_name: data[1] for pc_name, data in pc_to_person.items()}
-                update_pc_states_from_monitor(frame, cam_data.get("monitor_rois", []), cam_data.get("pc_states", {}), frame_start)
+                update_pc_states_from_monitor(frame, cam_data.get("monitor_rois", []), cam_data.get("pc_states", {}), frame_time_sec)
                 update_pc_activity_events(
                     cam_data["name"],
                     cam_data.get("pc_states", {}),
                     pc_to_person_map,
-                    frame_start,
+                    frame_time_sec,
                     cam_data.get("pc_event_logs", []),
                     cam_data.get("pc_unattended_logs", []),
                 )
@@ -903,15 +984,15 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 
             if detection_active:
                 raw_people_for_smoothing = person_count if do_infer else cam_data.get("person_count_raw", 0)
-                smoothed_people = update_smoothed_person_count(cam_data, raw_people_for_smoothing, frame_start)
+                smoothed_people = update_smoothed_person_count(cam_data, raw_people_for_smoothing, frame_time_sec)
                 cv2.putText(frame, f"People: {smoothed_people}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 if do_infer:
                     cam_data["last_annotated_frame"] = frame.copy()
             else:
-                update_smoothed_person_count(cam_data, 0, frame_start)
+                update_smoothed_person_count(cam_data, 0, frame_time_sec)
 
             frame_end = time.time()
-            latency_ms = (frame_end - frame_start) * 1000.0
+            latency_ms = (frame_end - loop_wall_start) * 1000.0
             cam_data["frames_seen"] += 1
             cam_data["total_latency_ms"] += latency_ms
             if cam_data["last_frame_time"] is not None:
@@ -937,7 +1018,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 # --- Start threads for each camera ---
 stop_event = threading.Event()
 run_start_day_tag = current_day_tag()
-pc_state_all_csv = os.path.join(LOG_BASE_DIR, "pc_state_all.csv")
+pc_state_all_csv = os.path.join(LOG_BASE_DIR, VIDEO_REALTIME_PC_STATE_FILENAME)
 
 pc_state_writer_thread = None
 if ENABLE_REALTIME_PC_STATE_CSV:
@@ -1001,8 +1082,9 @@ if ENABLE_RESOURCE_MONITOR and monitor_stop is not None and monitor_thread is no
 # Save logs per camera
 all_unattended_logs = []
 for cam_idx, cam_data in cams.items():
-    safe_name = cam_data.get("label") or to_safe_label(cam_data.get("name", f"cam{cam_idx}"))
-    people_file_prefix = f"people_with_conf_and_roi_{safe_name or f'cam{cam_idx}'}"
+    source_name = os.path.splitext(os.path.basename(str(cam_data.get("source_path") or "")))[0]
+    safe_name = cam_data.get("label") or to_safe_label(source_name) or to_safe_label(cam_data.get("name", "video"))
+    people_file_prefix = f"people_with_conf_and_roi_{safe_name}"
     people_csv_paths = append_rows_to_daily_csv(
         cam_data.get("logs", []),
         ["time", "person_id", "confidence", "roi_file", "PCnum"],
@@ -1013,7 +1095,7 @@ for cam_idx, cam_data in cams.items():
     primary_people_csv = people_csv_paths[-1] if people_csv_paths else ""
 
     # PC activity event log (USING_PC / NON_PC_ACTIVITY)
-    event_file_prefix = f"pc_activity_events_{safe_name or f'cam{cam_idx}'}"
+    event_file_prefix = f"pc_activity_events_{safe_name}"
     pc_event_csv_paths = append_rows_to_daily_csv(
         cam_data.get("pc_event_logs", []),
         ["time", "cam_name", "pc_name", "event_type", "person_id", "pc_on", "dwell_sec", "PCnum"],
@@ -1064,7 +1146,7 @@ for cam_idx, cam_data in cams.items():
     print("===============================")
     # append a per-camera summary row to a global performance CSV (create if missing)
     try:
-        perf_timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(cam_data.get("first_frame_time") or time.time()))
+        perf_timestamp = format_video_timestamp(cam_data.get("first_video_time") or 0.0)
         perf_row = {
             "session_timestamp": perf_timestamp,
             "cam_idx": cam_idx,
