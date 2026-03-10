@@ -1,0 +1,76 @@
+# Camera sources for live mode.
+# CAM_INDEXES are OpenCV capture IDs; CAM_NAMES are labels used in windows/logs/ROI matching.
+CAM_INDEXES:
+  - 0
+  - 1
+  - 2
+  - 3
+
+CAM_NAMES:
+  0: Front_right
+  1: Front_left
+  2: Back_left
+  3: Back_right
+
+# Frame and display settings.
+# SHOW_WINDOWS supports: Show / Hide.
+# Window width/height only apply when SHOW_WINDOWS is Show.
+FRAME_WIDTH: 1280
+FRAME_HEIGHT: 720
+SHOW_WINDOWS: Show
+WINDOWS_WIDTH: 960
+WINDOWS_HEIGHT: 540
+
+# Detection thresholds and ROI snapshot frequency.
+CONF_THRESHOLD: 0.4
+IOU_THRESHOLD: 0.4
+SAVE_INTERVAL_SEC: 30
+
+# Live-mode detection schedule (24-hour local time).
+DETECTION_START_HOUR_24: 8
+DETECTION_END_HOUR_24: 18
+
+# PC/monitor ROI behavior and thresholds.
+# Dwell + monitor thresholds control computed PC state transitions.
+ENABLE_PC_ROI: true
+ENABLE_MONITOR_ROI: true
+PERSON_OVERLAP_DWELL_SEC: 10.0
+PC_ON_NO_PERSON_DWELL_SEC: 300.0
+LATEST_PERSON_FLAG_LOOKBACK_SEC: 900.0
+MONITOR_ON_MEAN_THRESHOLD: 70.0
+MONITOR_ON_STD_THRESHOLD: 12.0
+MONITOR_STATE_STABLE_FRAMES: 3
+ROI_CONFIG_DIR: tool/roi_config
+CSV_SUFFIX: _roi.csv
+MONITOR_CSV_SUFFIX: _monitor_roi.csv
+
+# Runtime performance controls.
+# PROCESS_EVERY_N_FRAMES reduces inference load; SMOOTH_WINDOW_SEC stabilizes counters/states.
+ENABLE_RESOURCE_MONITOR: false
+PROCESS_EVERY_N_FRAMES: 2
+SMOOTH_WINDOW_SEC: 5.0
+
+# Realtime aggregated PC state output.
+ENABLE_REALTIME_PC_STATE_CSV: true
+REALTIME_PC_STATE_WRITE_INTERVAL_SEC: 1.0
+
+# Live-mode model and output paths.
+MODEL_PATH: yolov8n.pt
+LOG_BASE_DIR: logs
+ROI_IMAGES_SUBDIR: roi_images
+PERF_SUMMARY_FILENAME: performance_summary.csv
+
+# Offline video mode options.
+# Video filename stems are used for per-video labels and log naming.
+VIDEO_INPUT_DIR: test_vid
+VIDEO_GLOB_PATTERNS:
+  - '*.mp4'
+  - '*.avi'
+  - '*.mov'
+  - '*.mkv'
+VIDEO_MAX_SOURCES: 4
+VIDEO_LOG_BASE_DIR: logs_video_mode
+VIDEO_ROI_IMAGES_SUBDIR: roi_images
+VIDEO_PERF_SUMMARY_FILENAME: performance_summary.csv
+VIDEO_REALTIME_PC_STATE_FILENAME: pc_state_all.csv
+VIDEO_TIME_FALLBACK_FPS: 30.0
