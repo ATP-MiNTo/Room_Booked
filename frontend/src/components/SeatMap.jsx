@@ -30,20 +30,23 @@ const Seat = ({ seatNumber, isSelected, isBooked, onClick }) => {
 };
 
 const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [] }) => {
-  const seats = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, number: `${i + 1}` }));
+  // 👉 แก้จุดนี้: เปลี่ยนจาก String เป็น Number (i + 1 เพียวๆ)
+  const seats = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, number: i + 1 }));
   
   // แบ่งซ้าย-ขวา
   const leftSideSeats = seats.filter(seat => (seat.id - 1) % 6 < 3);
   const rightSideSeats = seats.filter(seat => (seat.id - 1) % 6 >= 3);
 
   const renderSeat = (seat) => {
-    const isBooked = bookedSeats.includes(seat.number);
+    // 👉 แก้จุดนี้: แปลงให้เป็น String ทั้งคู่ก่อนเทียบกัน จะได้ไม่พลาด
+    const isBooked = bookedSeats.some(booked => String(booked) === String(seat.number));
+    
     return (
       <Seat 
         key={seat.id} 
         seatNumber={seat.number} 
         isBooked={isBooked} 
-        isSelected={selectedSeatId === seat.number}
+        isSelected={String(selectedSeatId) === String(seat.number)} // ป้องกันบั๊กตอนคลิกเลือก
         onClick={() => onSelectSeat(seat.number)}
       />
     );

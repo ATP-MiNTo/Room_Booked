@@ -13,7 +13,21 @@ services:
     networks:
       - complab_network
 
-  # 2. Backend Service (FastAPI)
+  # 2. Nginx Service (ยามหน้าประตู)
+  nginx:
+    image: nginx:latest
+    container_name: complab_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - complab_network
+
+  # 3. Backend Service (FastAPI)
   backend:
     build: ./backend
     container_name: complab_backend
@@ -28,7 +42,7 @@ services:
     networks:
       - complab_network
 
-  # 3. Frontend Service (React/Vite)
+  # 4. Frontend Service (React/Vite)
   frontend:
     build: ./frontend
     container_name: complab_frontend

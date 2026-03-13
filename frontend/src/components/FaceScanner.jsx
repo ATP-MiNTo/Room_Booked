@@ -52,9 +52,10 @@ const FaceScanner = ({ onScanComplete, onCancel }) => {
 
         let detection;
         try {
+            // ใช้ความละเอียด 128 ให้คอมพิวเตอร์ไม่ต้องทำงานหนัก
             detection = await faceapi.detectSingleFace(
             video, 
-            new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })
+            new faceapi.TinyFaceDetectorOptions({ inputSize: 128, scoreThreshold: 0.25 })
             ).withFaceLandmarks();
         } catch (aiError) {
             return; 
@@ -88,11 +89,11 @@ const FaceScanner = ({ onScanComplete, onCancel }) => {
           const rightEye = landmarks.getRightEye();
           const avgEAR = (calculateEAR(leftEye) + calculateEAR(rightEye)) / 2;
 
-          if (avgEAR < 0.30) {
+          if (avgEAR < 0.28) {
             blinkDuration.current += 1;
           } 
-          else if (avgEAR > 0.30) {
-            if (blinkDuration.current > 2) {
+          else if (avgEAR > 0.28) {
+            if (blinkDuration.current >= 2) {
               setStatus('ยืนยันตัวตนสำเร็จ!');
               isProcessingRef.current = true; 
               capture(); 
@@ -113,7 +114,8 @@ const FaceScanner = ({ onScanComplete, onCancel }) => {
   }, [modelsLoaded]); 
 
   useEffect(() => {
-    const interval = setInterval(() => detectFace(), 100);
+    // 🐌 หน่วงเวลาการเช็คต่อรอบให้ช้าลงอีกนิดนึง จะได้พอดีๆ
+    const interval = setInterval(() => detectFace(), 120);
     return () => clearInterval(interval);
   }, [detectFace]);
 
@@ -123,7 +125,6 @@ const FaceScanner = ({ onScanComplete, onCancel }) => {
           const imageSrc = webcamRef.current.getScreenshot();
           setCapturedImage(imageSrc);
           
-          // สแกนเสร็จ โชว์รูปค้างไว้ 1.5 วิ แล้ววิ่งไปหน้าสรุปผลเลย (ไม่ต้องรอให้กดปุ่ม)
           setTimeout(() => {
             if (onScanComplete) onScanComplete(imageSrc);
           }, 1500);
@@ -132,7 +133,6 @@ const FaceScanner = ({ onScanComplete, onCancel }) => {
   };
 
   return (
-    // 👉 บังคับใส่ Inline Style เพื่อให้มันเป็น Popup ลอยทับหน้าจอ 100% 
     <div style={{
         position: 'fixed',
         top: 0,
@@ -140,7 +140,7 @@ const FaceScanner = ({ onScanComplete, onCancel }) => {
         width: '100vw',
         height: '100vh',
         backgroundColor: 'rgba(0, 0, 0, 0.85)',
-        zIndex: 99999, // ดันให้อยู่ชั้นบนสุด
+        zIndex: 99999, 
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center'
@@ -153,8 +153,8 @@ const FaceScanner = ({ onScanComplete, onCancel }) => {
             audio={false}
             playsInline={true}
             screenshotFormat="image/jpeg"
-            screenshotQuality={0.8} // ความชัด 80% ไฟล์ไม่หนัก
-            videoConstraints={{ width: 480, height: 640, facingMode: "user" }}
+            screenshotQuality={0.8}
+            videoConstraints={{ width: 350, height: 450, facingMode: "user" }}
             className="webcam-video"
           />
 
@@ -177,7 +177,6 @@ const FaceScanner = ({ onScanComplete, onCancel }) => {
         <div className="status-box">
           <h3 className={isProcessingRef.current ? "success-text" : ""}>{status}</h3>
           
-          {/* 👉 ปุ่มลองใหม่หายไปแล้ว เหลือแค่ปุ่มยกเลิกตอนที่ยังสแกนไม่ผ่าน */}
           {!capturedImage && (
              <button onClick={onCancel} className="cancel-btn">ยกเลิก</button>
           )}

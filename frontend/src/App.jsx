@@ -1,37 +1,66 @@
 // src/App.jsx
-import { useState, useMemo, forwardRef } from 'react';
+import { useState, useMemo, useEffect, forwardRef } from 'react';
 import { RiCalendarEventFill } from 'react-icons/ri'; 
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
+import Swal from 'sweetalert2'; 
 import SeatMap from './components/SeatMap';
 import ReservationForm from './components/ReservationForm';
 import TimeSelector from './components/TimeSelector';
-import FaceScanner from './components/FaceScanner'; // 👉 นำเข้าตัวสแกนหน้า
+import FaceScanner from './components/FaceScanner'; 
 import './styles/App.css'; 
 
+// 👉 ย้าย allTimeSlots ออกมาข้างนอก เพื่อให้คำนวณเวลาปัจจุบันได้ง่ายขึ้น
+const allTimeSlots = [ "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00" ];
+
+// 👉 ฟังก์ชันคำนวณหาเวลาปัจจุบัน (ปัดเศษขึ้นทีละ 30 นาที)
+const getInitialTimeSlots = () => {
+  const now = new Date();
+  let h = now.getHours();
+  let m = now.getMinutes();
+
+  // ปัดเศษขึ้นให้เป็นรอบ 30 นาที (เช่น 10:15 -> 10:30, 10:45 -> 11:00)
+  if (m > 0 && m <= 30) {
+    m = 30;
+  } else if (m > 30) {
+    m = 0;
+    h += 1;
+  }
+
+  const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  const idx = allTimeSlots.indexOf(timeStr);
+
+  // ถ้าเวลาปัจจุบันอยู่ในช่วงเวลาทำการ ให้ใช้เวลานั้น
+  if (idx !== -1 && idx < allTimeSlots.length - 1) {
+    return { start: allTimeSlots[idx], end: allTimeSlots[idx + 1] };
+  }
+  
+  // ถ้านอกเวลาทำการ (เช่น ดึกแล้ว) ให้กลับไปค่าเริ่มต้น 08:30
+  return { start: "08:30", end: "09:30" };
+};
+
 function App() {
-  // --- 1. State Management ---
   const [selectedSeat, setSelectedSeat] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date()); 
-  const [startTime, setStartTime] = useState("08:30");
-  const [endTime, setEndTime] = useState("09:30"); 
   
-  // 👉 เพิ่ม State สำหรับเปิด/ปิด Popup และเก็บข้อมูลระหว่างทาง
+  // 👉 ดึงเวลาปัจจุบันมาใช้เป็นค่าเริ่มต้น
+  const initialTimes = getInitialTimeSlots();
+  const [startTime, setStartTime] = useState(initialTimes.start);
+  const [endTime, setEndTime] = useState(initialTimes.end); 
+  
   const [showScanner, setShowScanner] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [tempData, setTempData] = useState(null);
   const [capturedImageBase64, setCapturedImageBase64] = useState(null);
 
-  // --- 2. Logic ---
+  const [bookedSeatsFromDB, setBookedSeatsFromDB] = useState([]);
+
   const formatThaiDate = (dateObj) => {
     if (!dateObj) return "";
     return dateObj.toLocaleDateString('th-TH', {
       weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
     });
   };
-
-  const allTimeSlots = [ "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00", "17:30", "18:00", "18:30", "19:00" ];
-  const mockBookings = { };
 
   const getDisplayEndTime = (time) => {
     if (!time) return "";
@@ -43,18 +72,27 @@ function App() {
     return `${hour.toString().padStart(2, '0')}:${min}`;
   };
 
-  const occupiedSeats = useMemo(() => {
-    if (!startTime || !endTime) return [];
-    const busySet = new Set();
-    const startIndex = allTimeSlots.indexOf(startTime);
-    const endIndex = allTimeSlots.indexOf(endTime);
-    for (let i = startIndex; i < endIndex; i++) {
-      const timeSlot = allTimeSlots[i];
-      const bookingsInSlot = mockBookings[timeSlot] || [];
-      bookingsInSlot.forEach(seat => busySet.add(seat));
+  useEffect(() => {
+    if (startTime && endTime && selectedDate) {
+      const fetchBookedSeats = async () => {
+        try {
+          const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+          const response = await fetch(`/booked-seats?reserve_date=${dateStr}&start_time=${startTime}&end_time=${endTime}`);
+          if (response.ok) {
+            const data = await response.json();
+            setBookedSeatsFromDB(data);
+          }
+        } catch (error) {
+          console.error("Error fetching seats:", error);
+        }
+      };
+      fetchBookedSeats();
     }
-    return Array.from(busySet);
-  }, [startTime, endTime]); 
+  }, [selectedDate, startTime, endTime]);
+
+  const occupiedSeats = useMemo(() => {
+    return bookedSeatsFromDB.map(seat => parseInt(seat));
+  }, [bookedSeatsFromDB]);
 
   const handleStartTimeChange = (newStart) => {
     setStartTime(newStart);
@@ -64,23 +102,19 @@ function App() {
     setSelectedSeat(null); 
   };
 
-  // 👉 STEP 1: กดยืนยันฟอร์ม -> เก็บข้อมูล -> เปิดสแกนหน้า
   const handleConfirmReservation = (data) => {
     setTempData(data);
     setShowScanner(true); 
   };
 
-  // 👉 STEP 2: สแกนเสร็จ -> เก็บรูป -> เปิดหน้าต่างสรุป
   const handleScanComplete = (imageSrc) => {
     setCapturedImageBase64(imageSrc);
     setShowScanner(false); 
     setShowSummary(true);  
   };
 
-  // 👉 STEP 3: กดยืนยันหน้าสรุป -> ยิงเข้า Database
   const handleFinalSubmit = async () => {
     try {
-        // แปลงรูป Base64 เป็นไฟล์จริงๆ ก่อนส่ง
         const res = await fetch(capturedImageBase64);
         const imageBlob = await res.blob();
 
@@ -88,36 +122,53 @@ function App() {
         formData.append("seat_id", selectedSeat);
         formData.append("student_id", tempData.studentId);
         formData.append("user_name", `${tempData.firstName} ${tempData.lastname}`);
+        formData.append("major", tempData.major || "ไม่ระบุ");
         
-        // แปลงวันที่เป็น YYYY-MM-DD
         const dateString = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
         formData.append("reserve_date", dateString);
         formData.append("start_time", startTime);
         formData.append("end_time", endTime);
         formData.append("purpose", tempData.purpose || "ไม่ระบุ");
-        
-        // แนบไฟล์รูปลงกล่อง (ส่งเป็น .jpg)
         formData.append("image", imageBlob, "face_capture.jpg");
 
-        // ยิงข้อมูลไปที่หลังบ้าน FastAPI
-        const response = await fetch("http://localhost:8000/reserve-with-image", {
+        const response = await fetch("/reserve-with-image", {
             method: "POST",
             body: formData,
         });
 
         if (response.ok) {
-            alert("✅ บันทึกข้อมูลและรูปภาพสำเร็จ!");
-            setShowSummary(false); // ปิดหน้าต่าง
-            setSelectedSeat(null); // เคลียร์ที่นั่ง
-            setTempData(null);
-            setCapturedImageBase64(null);
+            Swal.fire({
+                title: 'สำเร็จ!',
+                text: 'บันทึกข้อมูลและรูปภาพสำเร็จ',
+                icon: 'success',
+                confirmButtonText: 'ตกลง',
+                confirmButtonColor: '#4CAF50'
+            }).then((result) => {
+                // 👉 เมื่อผู้ใช้กดปุ่ม "ตกลง" ให้ทำการรีเฟรชหน้าเว็บใหม่ทั้งหมด
+                if (result.isConfirmed) {
+                    window.location.reload(); 
+                }
+            });
+
         } else {
             const errorData = await response.json();
-            alert(`❌ เกิดข้อผิดพลาด: ${errorData.detail}`);
+            Swal.fire({
+                title: 'เกิดข้อผิดพลาด!',
+                text: errorData.detail,
+                icon: 'error',
+                confirmButtonText: 'ตกลง',
+                confirmButtonColor: '#d33'
+            });
         }
     } catch (error) {
         console.error("Error saving to DB:", error);
-        alert("❌ ไม่สามารถติดต่อเซิร์ฟเวอร์ฐานข้อมูลได้");
+        Swal.fire({
+            title: 'เชื่อมต่อล้มเหลว!',
+            text: 'ไม่สามารถติดต่อเซิร์ฟเวอร์ฐานข้อมูลได้',
+            icon: 'error',
+            confirmButtonText: 'ตกลง',
+            confirmButtonColor: '#d33'
+        });
     }
   };
 
@@ -145,11 +196,8 @@ function App() {
     return day !== 0; 
   };
 
-  // --- 3. Render ---
   return (
     <div className="main-layout">
-      
-      {/* 🔴 Popup 1: สแกนหน้า */}
       {showScanner && (
         <FaceScanner 
             onScanComplete={handleScanComplete} 
@@ -157,7 +205,6 @@ function App() {
         />
       )}
 
-      {/* 🟢 Popup 2: สรุปข้อมูล (ก่อนบันทึก) */}
       {showSummary && (
         <div className="summary-overlay" style={{
             position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
@@ -170,6 +217,7 @@ function App() {
                 <div style={{lineHeight: '1.8', fontSize: '1.05rem', marginBottom: '20px'}}>
                     <div><strong>ชื่อ-สกุล:</strong> {tempData.firstName} {tempData.lastname}</div>
                     <div><strong>รหัสนักศึกษา:</strong> {tempData.studentId}</div>
+                    <div><strong>สาขา:</strong> {tempData.major || 'ไม่ระบุ'}</div>
                     <div><strong>วันที่:</strong> {formatThaiDate(selectedDate)}</div>
                     <div><strong>เวลา:</strong> {startTime} - {getDisplayEndTime(endTime)}</div>
                     <div><strong>โต๊ะที่:</strong> {selectedSeat}</div>
@@ -190,7 +238,6 @@ function App() {
         </div>
       )}
 
-      {/* ฝั่งซ้าย */}
       <div className="layout-left">
         <div className="seat-map-wrapper">
           <SeatMap 
@@ -201,7 +248,6 @@ function App() {
         </div>
       </div>
 
-      {/* ฝั่งขวา */}
       <div className="layout-right">
         <div style={{ backgroundColor: '#2c3e50', color: 'white', padding: '20px', borderRadius: '10px', marginBottom: '20px', display: 'flex', flexDirection: 'column', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
             <div style={{ fontSize: '0.95rem', opacity: 0.8, marginBottom: '5px', textAlign: 'left', width: '100%' }}>วันที่จอง</div>
@@ -225,7 +271,7 @@ function App() {
         {selectedSeat && endTime ? (
           <ReservationForm 
             selectedSeat={selectedSeat} startTime={startTime} displayEndTime={getDisplayEndTime(endTime)}
-            onConfirm={handleConfirmReservation} // 👉 ผูกเข้ากับการเปิดกล้อง
+            onConfirm={handleConfirmReservation}
           />
         ) : (
           !selectedSeat && (
