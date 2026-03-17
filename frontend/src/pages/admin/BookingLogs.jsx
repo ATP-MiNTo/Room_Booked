@@ -1,6 +1,5 @@
-// src/pages/admin/BookingLogs.jsx
 import { useState, useEffect } from 'react';
-import AdminLayout from './AdminLayout'; // 👈 นำเข้าโครงร่าง Sidebar ที่เราเพิ่งสร้าง
+import AdminLayout from './AdminLayout'; 
 
 export default function BookingLogs() {
   const [logs, setLogs] = useState([]);
@@ -37,7 +36,7 @@ export default function BookingLogs() {
   });
 
   return (
-    // ✨ สวม AdminLayout ครอบเนื้อหาทั้งหมดไว้ ✨
+    // สวม AdminLayout ครอบเนื้อหาทั้งหมดไว้
     <AdminLayout>
       <div style={styles.container}>
         <div style={styles.title}>Booking Logs (ประวัติการจอง)</div>
@@ -103,7 +102,6 @@ export default function BookingLogs() {
   );
 }
 
-// ลบ style body เดิมออก เพราะเราให้ AdminLayout จัดการพื้นหลังให้แล้ว
 const styles = {
   container: { background: 'white', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' },
   title: { fontSize: '24px', fontWeight: 'bold', marginBottom: '20px', color: '#2c3e50' },

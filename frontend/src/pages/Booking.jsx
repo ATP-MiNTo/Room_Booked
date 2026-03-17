@@ -1,12 +1,10 @@
-// src/pages/Booking.jsx
 import { useState, useMemo, useEffect, forwardRef, useRef } from 'react';
-import { useNavigate } from 'react-router-dom'; // 👈 เพิ่ม useNavigate
-import { RiCalendarEventFill, RiSettings3Fill } from 'react-icons/ri'; // 👈 เพิ่มไอคอนฟันเฟือง
+import { useNavigate } from 'react-router-dom'; 
+import { RiCalendarEventFill, RiSettings3Fill } from 'react-icons/ri'; 
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import Swal from 'sweetalert2'; 
 
-// สังเกตว่าเราใช้ ../ เพื่อถอยออกมาหา components และ styles
 import SeatMap from '../components/SeatMap';
 import ReservationForm from '../components/ReservationForm';
 import TimeSelector from '../components/TimeSelector';
@@ -38,7 +36,7 @@ const getInitialTimeSlots = () => {
 };
 
 function Booking() {
-  const navigate = useNavigate(); // 👈 ประกาศใช้งานตัวสลับหน้า
+  const navigate = useNavigate(); 
 
   const [selectedSeat, setSelectedSeat] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date()); 
@@ -264,7 +262,7 @@ function Booking() {
       >
         <RiSettings3Fill size={24} />
       </div>
-      {/* ✨ จบโค้ดปุ่มลอย ✨ */}
+      {/*  */}
 
       {showScanner && (
         <FaceScanner 

@@ -1,4 +1,3 @@
-// src/pages/admin/AdminLayout.jsx
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -22,10 +21,10 @@ export default function AdminLayout({ children }) {
   return (
     <div style={{ display: 'flex', height: '100vh', backgroundColor: '#f3f4f6', overflow: 'hidden' }}>
       
-      {/* 🟢 Sidebar ด้านซ้าย */}
+      {/* Sidebar ด้านซ้าย */}
       <div style={{ 
         width: sidebarWidth, 
-        backgroundColor: '#1e1e2d', // สีน้ำเงินเข้ม/ดำ แบบในรูปตัวอย่าง
+        backgroundColor: '#1e1e2d', 
         color: 'white', 
         transition: 'width 0.3s ease',
         display: 'flex',
@@ -91,9 +90,9 @@ export default function AdminLayout({ children }) {
         </div>
       </div>
 
-      {/* ⚪️ พื้นที่ Content ด้านขวา */}
+      {/* พื้นที่ Content ด้านขวา */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '30px' }}>
-        {children} {/* 👈 ตรงนี้คือจุดที่จะเอาหน้าตาราง BookingLogs มาเสียบ */}
+        {children} {/* ตรงนี้คือจุดที่จะเอาหน้าตาราง BookingLogs มาเสียบ */}
       </div>
 
     </div>
