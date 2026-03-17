@@ -7,6 +7,6 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    allowedHosts: true // 👉 เพิ่มบรรทัดนี้ เพื่ออนุญาตให้โดเมนของ Ngrok เข้าถึงได้
+    allowedHosts: true 
   }
 })

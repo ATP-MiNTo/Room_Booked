@@ -1,10 +1,10 @@
 import os
 import shutil
-from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form
+import json
+from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form, WebSocket, WebSocketDisconnect 
 from pydantic import BaseModel
 from datetime import datetime, date, time, timezone, timedelta
 
-# 👉 ดึง get_db มาจากไฟล์ database.py ที่อยู่โฟลเดอร์เดียวกัน
 from database import get_db
 
 router = APIRouter()
@@ -171,3 +171,52 @@ def get_all_reservations():
     finally:
         cur.close()
         conn.close()
+
+
+# =================================================================
+# ระบบ WebSocket สำหรับล็อกที่นั่งชั่วคราว (สีเหลือง)
+# =================================================================
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+        self.locked_seats = {} 
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        await websocket.send_json({"type": "INIT", "data": list(self.locked_seats.keys())})
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                pass
+
+manager = ConnectionManager()
+
+@router.websocket("/ws/seats")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            payload = json.loads(data)
+            action = payload.get("action")
+            seat_key = payload.get("seat_key")
+
+            if action == "lock":
+                manager.locked_seats[seat_key] = True
+                await manager.broadcast({"type": "LOCK", "seat_key": seat_key})
+            
+            elif action == "unlock":
+                if seat_key in manager.locked_seats:
+                    del manager.locked_seats[seat_key]
+                await manager.broadcast({"type": "UNLOCK", "seat_key": seat_key})
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)

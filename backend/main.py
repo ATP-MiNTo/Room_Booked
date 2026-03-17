@@ -3,7 +3,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-# 👉 ดึง router จากไฟล์ reservation.py ที่อยู่ข้างๆ กันมาใช้งาน
 from reservation import router as reservation_router
 
 app = FastAPI()
@@ -22,7 +21,7 @@ ROOT_DIR = os.path.dirname(BACKEND_DIR)
 # Mount path สำหรับให้หน้าเว็บดึงรูปไปโชว์
 app.mount("/data", StaticFiles(directory=os.path.join(ROOT_DIR, "data")), name="data")
 
-# 👉 เสียบปลั๊ก API การจองเข้ากับตัวหลัก
+
 app.include_router(reservation_router)
 
 @app.get("/")

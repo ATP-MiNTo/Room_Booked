@@ -22,7 +22,7 @@
     -- ALTER TABLE reservations ADD COLUMN image_name TEXT;
 
     -- ลบคอมลัมน์
-    ALTER TABLE student_info DROP COLUMN total_usage_minutes;
+    -- ALTER TABLE student_info DROP COLUMN total_usage_minutes;
 
     -- ลบข้อมูล
     -- TRUNCATE TABLE reservations, student_info RESTART IDENTITY CASCADE;
