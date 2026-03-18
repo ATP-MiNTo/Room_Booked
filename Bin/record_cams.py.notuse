@@ -1,0 +1,455 @@
+import os
+import time
+import threading
+from datetime import datetime
+
+import cv2
+
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
+CAM_INDEXES = [0, 1, 2, 3]
+CAM_NAMES = {
+    0: "Front_right",
+    1: "Front_left",
+    2: "Back_left",
+    3: "Back_right",
+}
+
+FRAME_WIDTH = 1280
+FRAME_HEIGHT = 720
+FPS = 30
+FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
+
+# Save directly to test_vid
+VIDEO_DIR = "test_vid"
+
+# -----------------------------------------------------------------------------
+# Recording condition mode (swap here)
+# -----------------------------------------------------------------------------
+# "time_based" -> record all cameras only inside a daily time range
+# "on_demand"  -> record all cameras immediately when ON_DEMAND_RECORD_NOW is True
+RECORD_MODE = "on_demand"
+
+# On-demand settings
+ON_DEMAND_RECORD_NOW = True
+# seconds: <= 0 means keep recording until program is stopped
+ON_DEMAND_DURATION_SEC = 60
+
+# Time-based settings (24-hour HH:MM)
+TIME_BASE_START = "11:50"
+TIME_BASE_END = "17:10"
+TIME_BASE_DAYS = ["wednesday"]
+
+WEEKDAY_NAMES = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+WEEKDAY_NAME_SET = set(WEEKDAY_NAMES)
+TIME_BASE_DAYS_NORMALIZED = []
+
+
+NO_FRAME_SLEEP_SEC = 0.05
+IDLE_SLEEP_SEC = 0.05
+STARTUP_RECORD_DELAY_SEC = 30
+
+# Capture hardening for multi-camera setups on Windows.
+CAPTURE_BACKENDS = (
+    ("DSHOW", getattr(cv2, "CAP_DSHOW", cv2.CAP_ANY)),
+    ("MSMF", getattr(cv2, "CAP_MSMF", cv2.CAP_ANY)),
+    ("ANY", cv2.CAP_ANY),
+)
+CAPTURE_FOURCC = cv2.VideoWriter_fourcc(*"MJPG")
+CAPTURE_WARMUP_FRAMES = 10
+REOPEN_AFTER_READ_FAILURES = 40
+REOPEN_AFTER_CORRUPT_FRAMES = 30
+CORRUPT_FRAME_PIXEL_MAX = 2
+REOPEN_RETRY_COUNT = 3
+REOPEN_RETRY_SLEEP_SEC = 0.5
+
+
+def ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
+
+
+def to_safe_label(value: str) -> str:
+    cleaned = "".join((c if c.isalnum() or c in ("-", "_") else "_") for c in str(value).strip())
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    return cleaned.strip("_") or "unknown"
+
+
+def format_timestamp(ts: float) -> str:
+    return time.strftime("%Y%m%d_%H%M%S", time.localtime(ts))
+
+
+def _parse_hhmm(value: str):
+    parts = str(value).strip().split(":")
+    if len(parts) != 2:
+        raise ValueError(f"Invalid HH:MM value: {value}")
+    hour = int(parts[0])
+    minute = int(parts[1])
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        raise ValueError(f"Invalid HH:MM value: {value}")
+    return hour, minute
+
+
+def _normalize_days(days_value):
+    if days_value is None:
+        return []
+
+    if isinstance(days_value, str):
+        raw_days = [days_value]
+    elif isinstance(days_value, (list, tuple, set)):
+        raw_days = list(days_value)
+    else:
+        raise ValueError("TIME_BASE_DAYS must be list/tuple/set[str] or a single string")
+
+    normalized = []
+    for day in raw_days:
+        day_name = str(day).strip().lower()
+        if not day_name:
+            continue
+        if day_name not in WEEKDAY_NAME_SET:
+            raise ValueError(
+                f"Invalid day '{day}'. Use one of: {', '.join(WEEKDAY_NAMES)}"
+            )
+        if day_name not in normalized:
+            normalized.append(day_name)
+
+    return normalized
+
+
+def is_in_time_range(now_dt: datetime, start_hhmm: str, end_hhmm: str, allowed_days=None) -> bool:
+    start_h, start_m = _parse_hhmm(start_hhmm)
+    end_h, end_m = _parse_hhmm(end_hhmm)
+
+    now_minutes = (now_dt.hour * 60) + now_dt.minute
+    start_minutes = (start_h * 60) + start_m
+    end_minutes = (end_h * 60) + end_m
+    now_day_name = WEEKDAY_NAMES[now_dt.weekday()]
+    allowed_day_set = set(allowed_days or [])
+
+    # same start/end means full-day recording
+    if start_minutes == end_minutes:
+        if not allowed_day_set:
+            return True
+        return now_day_name in allowed_day_set
+
+    # normal range, e.g. 08:00 -> 18:00
+    if start_minutes < end_minutes:
+        if not (start_minutes <= now_minutes < end_minutes):
+            return False
+        if not allowed_day_set:
+            return True
+        return now_day_name in allowed_day_set
+
+    # overnight range, e.g. 22:00 -> 06:00
+    if now_minutes >= start_minutes:
+        if not allowed_day_set:
+            return True
+        return now_day_name in allowed_day_set
+
+    if now_minutes < end_minutes:
+        if not allowed_day_set:
+            return True
+        prev_day_name = WEEKDAY_NAMES[(now_dt.weekday() - 1) % 7]
+        return prev_day_name in allowed_day_set
+
+    return False
+
+
+class CameraRecorder:
+    def __init__(self, cam_idx: int, cam_name: str, stop_event: threading.Event, on_demand_end_ts):
+        self.cam_idx = cam_idx
+        self.cam_name = cam_name
+        self.stop_event = stop_event
+        self.on_demand_end_ts = on_demand_end_ts
+
+        self.cap = None
+        self.capture_backend_name = None
+        self.writer = None
+        self.writer_size = None
+        self.output_path = None
+
+    def _is_corrupt_frame(self, frame) -> bool:
+        if frame is None:
+            return True
+        if frame.size == 0:
+            return True
+        sample = frame[::8, ::8]
+        return int(sample.max()) <= CORRUPT_FRAME_PIXEL_MAX
+
+    def _release_capture(self):
+        if self.cap is None:
+            return
+        try:
+            self.cap.release()
+        except Exception:
+            pass
+        self.cap = None
+        self.capture_backend_name = None
+
+    def _configure_capture(self, cap):
+        if CAPTURE_FOURCC:
+            cap.set(cv2.CAP_PROP_FOURCC, CAPTURE_FOURCC)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+        cap.set(cv2.CAP_PROP_FPS, FPS)
+
+    def _open_capture(self):
+        tried_backends = set()
+
+        for backend_name, backend_flag in CAPTURE_BACKENDS:
+            if backend_flag in tried_backends:
+                continue
+            tried_backends.add(backend_flag)
+
+            cap = cv2.VideoCapture(self.cam_idx, backend_flag)
+            if not cap.isOpened():
+                cap.release()
+                continue
+
+            self._configure_capture(cap)
+
+            got_valid_frame = False
+            for _ in range(max(1, CAPTURE_WARMUP_FRAMES)):
+                ok, frame = cap.read()
+                if ok and not self._is_corrupt_frame(frame):
+                    got_valid_frame = True
+                    break
+
+            if not got_valid_frame:
+                cap.release()
+                continue
+
+            self.cap = cap
+            self.capture_backend_name = backend_name
+            return
+
+        raise RuntimeError(f"Cannot open camera {self.cam_idx} ({self.cam_name})")
+
+    def _open_capture_with_retry(self, reason: str) -> bool:
+        self._release_capture()
+        last_error = None
+
+        for attempt in range(1, REOPEN_RETRY_COUNT + 1):
+            if self.stop_event.is_set():
+                return False
+
+            try:
+                self._open_capture()
+                print(
+                    f"[READY] {self.cam_name} camera opened with backend="
+                    f"{self.capture_backend_name} ({reason})"
+                )
+                return True
+            except Exception as e:
+                last_error = e
+                print(
+                    f"[WARN] {self.cam_name} open failed ({reason}) "
+                    f"attempt {attempt}/{REOPEN_RETRY_COUNT}: {e}"
+                )
+                time.sleep(REOPEN_RETRY_SLEEP_SEC)
+
+        print(f"[ERROR] {self.cam_name} cannot recover camera stream: {last_error}")
+        return False
+
+    def _should_record(self, now_ts: float) -> bool:
+        if RECORD_MODE == "time_based":
+            return is_in_time_range(
+                datetime.now(),
+                TIME_BASE_START,
+                TIME_BASE_END,
+                TIME_BASE_DAYS_NORMALIZED,
+            )
+
+        if RECORD_MODE == "on_demand":
+            if not ON_DEMAND_RECORD_NOW:
+                return False
+            if ON_DEMAND_DURATION_SEC <= 0:
+                return True
+            if self.on_demand_end_ts is None:
+                self.on_demand_end_ts = now_ts + ON_DEMAND_DURATION_SEC
+            return now_ts < self.on_demand_end_ts
+
+        return False
+
+    def _start_recording(self, frame):
+        if self.writer is not None:
+            return
+
+        safe_cam = to_safe_label(self.cam_name)
+        filename = f"{safe_cam}.mp4"
+        self.output_path = os.path.join(VIDEO_DIR, filename)
+
+        h, w = frame.shape[:2]
+        writer = cv2.VideoWriter(self.output_path, FOURCC, FPS, (w, h))
+        if not writer.isOpened():
+            failed_path = self.output_path
+            self.output_path = None
+            print(f"[ERROR] Failed to create writer for {self.cam_name}: {failed_path}")
+            return
+
+        self.writer = writer
+        print(f"[START] {self.cam_name} -> {self.output_path}")
+
+    def _stop_recording(self):
+        if self.writer is None:
+            return
+
+        try:
+            self.writer.release()
+        except Exception:
+            pass
+
+        print(f"[STOP] {self.cam_name} -> {self.output_path}")
+        self.writer = None
+        self.writer_size = None
+        self.output_path = None
+
+    def run(self):
+        if not self._open_capture_with_retry("startup"):
+            return
+
+        if STARTUP_RECORD_DELAY_SEC > 0:
+            print(
+                f"[INFO] {self.cam_name} opened. Waiting {STARTUP_RECORD_DELAY_SEC}s "
+                "before recording."
+            )
+            time.sleep(STARTUP_RECORD_DELAY_SEC)
+
+        read_fail_count = 0
+        corrupt_frame_count = 0
+
+        try:
+            while not self.stop_event.is_set():
+                ok, frame = self.cap.read()
+                if not ok or frame is None or frame.size == 0:
+                    read_fail_count += 1
+                    if read_fail_count >= REOPEN_AFTER_READ_FAILURES:
+                        print(
+                            f"[WARN] {self.cam_name} had {read_fail_count} read failures. "
+                            "Reopening capture."
+                        )
+                        if not self._open_capture_with_retry("read failures"):
+                            break
+                        read_fail_count = 0
+                        corrupt_frame_count = 0
+                    time.sleep(NO_FRAME_SLEEP_SEC)
+                    continue
+
+                read_fail_count = 0
+
+                if self._is_corrupt_frame(frame):
+                    corrupt_frame_count += 1
+                    if corrupt_frame_count >= REOPEN_AFTER_CORRUPT_FRAMES:
+                        print(
+                            f"[WARN] {self.cam_name} produced {corrupt_frame_count} black frames. "
+                            "Reopening capture."
+                        )
+                        if not self._open_capture_with_retry("black frames"):
+                            break
+                        corrupt_frame_count = 0
+                        read_fail_count = 0
+                    time.sleep(NO_FRAME_SLEEP_SEC)
+                    continue
+
+                corrupt_frame_count = 0
+
+                now_ts = time.time()
+                record_now = self._should_record(now_ts)
+
+                if record_now:
+                    if self.writer is None:
+                        self._start_recording(frame)
+                    if self.writer is not None:
+                        current_size = (frame.shape[1], frame.shape[0])
+                        if self.writer_size is None:
+                            self.writer_size = current_size
+                        elif self.writer_size != current_size:
+                            print(
+                                f"[WARN] {self.cam_name} frame size changed "
+                                f"{self.writer_size} -> {current_size}. Restarting writer."
+                            )
+                            self._stop_recording()
+                            self._start_recording(frame)
+                        self.writer.write(frame)
+                else:
+                    if self.writer is not None:
+                        self._stop_recording()
+                    time.sleep(IDLE_SLEEP_SEC)
+
+        except Exception as e:
+            print(f"[ERROR] {self.cam_name} runtime error: {e}")
+        finally:
+            self._stop_recording()
+            self._release_capture()
+            print(f"[EXIT] {self.cam_name} camera thread closed")
+
+
+def validate_config():
+    global TIME_BASE_DAYS_NORMALIZED
+
+    if RECORD_MODE not in ("time_based", "on_demand"):
+        raise ValueError("RECORD_MODE must be 'time_based' or 'on_demand'")
+
+    TIME_BASE_DAYS_NORMALIZED = _normalize_days(TIME_BASE_DAYS)
+
+    if RECORD_MODE == "time_based":
+        _parse_hhmm(TIME_BASE_START)
+        _parse_hhmm(TIME_BASE_END)
+
+
+def main():
+    ensure_dir(VIDEO_DIR)
+    validate_config()
+
+    if RECORD_MODE == "on_demand" and not ON_DEMAND_RECORD_NOW:
+        print("[INFO] RECORD_MODE='on_demand' but ON_DEMAND_RECORD_NOW=False. Nothing to record.")
+        return
+
+    stop_event = threading.Event()
+    threads = []
+
+    on_demand_end_ts = None
+    if RECORD_MODE == "on_demand" and ON_DEMAND_RECORD_NOW and ON_DEMAND_DURATION_SEC > 0:
+        on_demand_end_ts = time.time() + STARTUP_RECORD_DELAY_SEC + ON_DEMAND_DURATION_SEC
+
+    print(
+        f"[INFO] Starting recorder mode={RECORD_MODE}, output_dir={VIDEO_DIR}, "
+        f"time_range={TIME_BASE_START}-{TIME_BASE_END}, on_demand_now={ON_DEMAND_RECORD_NOW}, "
+        f"time_days={TIME_BASE_DAYS_NORMALIZED if TIME_BASE_DAYS_NORMALIZED else 'all'}, "
+        f"on_demand_duration={ON_DEMAND_DURATION_SEC}s"
+    )
+
+    for cam_idx in CAM_INDEXES:
+        cam_name = CAM_NAMES.get(cam_idx, f"Cam{cam_idx}")
+        recorder = CameraRecorder(cam_idx, cam_name, stop_event, on_demand_end_ts)
+        thread = threading.Thread(target=recorder.run, daemon=True)
+        thread.start()
+        threads.append(thread)
+
+    try:
+        while any(t.is_alive() for t in threads):
+            if RECORD_MODE == "on_demand" and on_demand_end_ts is not None and time.time() >= on_demand_end_ts:
+                print("[INFO] On-demand duration completed. Stopping all cameras.")
+                stop_event.set()
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        print("[INFO] Interrupted by user. Shutting down.")
+        stop_event.set()
+
+    for t in threads:
+        t.join(timeout=5)
+
+    print("[INFO] All camera threads stopped")
+
+
+if __name__ == "__main__":
+    main()
