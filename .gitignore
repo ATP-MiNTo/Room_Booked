@@ -9,3 +9,6 @@ logs/Front_left/
 logs/Front_right/
 logs/roi_images/
 logs/pc_state_all.csv
+pc_unattended_flags_*
+test_vid
+*.mp4
