@@ -687,6 +687,105 @@ def realtime_pc_state_writer(cams, csv_path, stop_event, interval_sec=1.0):
     except Exception as e:
         print(f"Failed to finalize realtime PC-state CSV: {e}")
 
+
+def build_session_config_string(cams):
+    """Build session configuration string for logging: file | hardware | PC ROI | Monitor ROI | SHOW_WINDOWS"""
+    # Determine hardware
+    hardware = "gpu" if device.startswith("cuda") else "cpu"
+    
+    # Determine if PC ROIs were loaded in any camera
+    pc_roi_loaded = any(len(cam_data.get("pc_rois", [])) > 0 for cam_data in cams.values())
+    pc_roi_status = "PC roi loaded" if pc_roi_loaded else "PC roi not loaded"
+    
+    # Determine if Monitor ROIs were loaded in any camera
+    monitor_roi_loaded = any(len(cam_data.get("monitor_rois", [])) > 0 for cam_data in cams.values())
+    monitor_roi_status = "Monitor roi loaded" if monitor_roi_loaded else "Monitor roi not loaded"
+    
+    # Get SHOW_WINDOWS setting
+    show_windows_status = SHOW_WINDOWS
+    
+    return f"threaded_video_mode.py | {hardware} | {pc_roi_status} | {monitor_roi_status} | {show_windows_status}"
+
+
+def create_daily_summary_report(cams, day_tag, output_dir):
+    """Create a daily summary report aggregating person detection and PC usage data"""
+    try:
+        summary_rows = []
+        
+        # Collect all person data from daily CSV files
+        all_persons = set()
+        all_pc_usage = {}
+        
+        for cam_idx, cam_data in cams.items():
+            cam_label = cam_data.get("label", to_safe_label(cam_data.get("name", f"cam{cam_idx}")))
+            
+            # Read people CSV
+            people_csv = os.path.join(cam_data.get("log_dir", LOG_BASE_DIR), 
+                                      f"people_with_conf_and_roi_{cam_label}_{day_tag}.csv")
+            if os.path.exists(people_csv):
+                try:
+                    people_df = pd.read_csv(people_csv)
+                    for _, row in people_df.iterrows():
+                        all_persons.add(str(row.get("person_id", "unknown")))
+                        pc = row.get("PCnum")
+                        if pc and str(pc).lower() not in ["none", "nan", ""]:
+                            pc_key = str(pc)
+                            if pc_key not in all_pc_usage:
+                                all_pc_usage[pc_key] = {"persons": set(), "event_count": 0}
+                            all_pc_usage[pc_key]["persons"].add(str(row.get("person_id", "unknown")))
+                except Exception as e:
+                    print(f"Warning: Failed to read people CSV {people_csv}: {e}")
+            
+            # Read PC activity events CSV
+            event_csv = os.path.join(cam_data.get("log_dir", LOG_BASE_DIR),
+                                    f"pc_activity_events_{cam_label}_{day_tag}.csv")
+            if os.path.exists(event_csv):
+                try:
+                    event_df = pd.read_csv(event_csv)
+                    for _, row in event_df.iterrows():
+                        pc = row.get("pc_name")
+                        if pc and str(pc).lower() not in ["none", "nan", ""]:
+                            pc_key = str(pc)
+                            if pc_key not in all_pc_usage:
+                                all_pc_usage[pc_key] = {"persons": set(), "event_count": 0}
+                            all_pc_usage[pc_key]["event_count"] += 1
+                            all_pc_usage[pc_key]["persons"].add(str(row.get("person_id", "unknown")))
+                except Exception as e:
+                    print(f"Warning: Failed to read activity CSV {event_csv}: {e}")
+        
+        # Build summary rows
+        date_str = f"{day_tag[0:4]}-{day_tag[4:6]}-{day_tag[6:8]}"
+        
+        summary_rows.append({
+            "date": date_str,
+            "day_tag": day_tag,
+            "total_unique_persons": len(all_persons),
+            "persons_list": ", ".join(sorted(all_persons)) if all_persons else "None",
+        })
+        
+        # Add per-PC usage summary
+        for pc_name in sorted(all_pc_usage.keys()):
+            summary_rows.append({
+                "date": date_str,
+                "day_tag": day_tag,
+                "pc_name": pc_name,
+                "pc_usage_count": all_pc_usage[pc_name]["event_count"],
+                "pc_users": ", ".join(sorted(all_pc_usage[pc_name]["persons"])) if all_pc_usage[pc_name]["persons"] else "None",
+            })
+        
+        # Write summary CSV
+        if summary_rows:
+            os.makedirs(output_dir, exist_ok=True)
+            summary_file = os.path.join(output_dir, f"daily_summary_{day_tag}.csv")
+            summary_df = pd.DataFrame(summary_rows)
+            summary_df.to_csv(summary_file, index=False)
+            print(f"Daily summary report created: {summary_file}")
+            return summary_file
+        return None
+    except Exception as e:
+        print(f"Failed to create daily summary report: {e}")
+        return None
+
 # Create base directories
 os.makedirs(LOG_BASE_DIR, exist_ok=True)
 os.makedirs(ROI_BASE_DIR, exist_ok=True)
@@ -1147,6 +1246,7 @@ for cam_idx, cam_data in cams.items():
     # append a per-camera summary row to a global performance CSV (create if missing)
     try:
         perf_timestamp = format_video_timestamp(cam_data.get("first_video_time") or 0.0)
+        session_config = build_session_config_string(cams)
         perf_row = {
             "session_timestamp": perf_timestamp,
             "cam_idx": cam_idx,
@@ -1181,6 +1281,9 @@ for cam_idx, cam_data in cams.items():
             perf_row["avg_gpu_mem_bytes"] = 0
             perf_row["peak_gpu_mem_bytes"] = 0
 
+        # Add config as last column
+        perf_row["config"] = session_config
+
         perf_df = pd.DataFrame([perf_row])
         write_header = not os.path.exists(PERF_SUMMARY_FILE)
         perf_df.to_csv(PERF_SUMMARY_FILE, mode="a", index=False, header=write_header)
@@ -1204,6 +1307,9 @@ else:
         f"{len(all_unattended_csv_paths)} daily file(s): "
         f"{all_unattended_csv_paths[0]} -> {all_unattended_csv_paths[-1]}"
     )
+
+# create daily summary report
+create_daily_summary_report(cams, run_start_day_tag, LOG_BASE_DIR)
 
 if ENABLE_REALTIME_PC_STATE_CSV:
     print(f"Realtime all-PC state CSV saved to {pc_state_all_csv}")
