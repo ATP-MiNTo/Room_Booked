@@ -1,3 +1,4 @@
+// src/components/SeatMap.jsx
 import { RiComputerFill, RiUserFill } from "react-icons/ri"; 
 import '../styles/App.css'; 
 
@@ -7,7 +8,6 @@ const Seat = ({ seatNumber, isSelected, isBooked, isLocked, onClick }) => {
   else if (isSelected) iconColor = "#4CAF50"; 
   else if (isLocked) iconColor = "#facc15"; 
 
-  // เช็กว่าโดนจอง หรือมีคนกำลังกดอยู่ (สีเหลือง) จะกดไม่ได้
   const isDisabled = isBooked || isLocked;
 
   return (
@@ -18,7 +18,7 @@ const Seat = ({ seatNumber, isSelected, isBooked, isLocked, onClick }) => {
         cursor: isDisabled ? 'not-allowed' : 'pointer', 
         opacity: isBooked ? 0.6 : 1,
         transition: 'transform 0.2s',
-        animation: isLocked ? 'pulse 2s infinite' : 'none' // แอนิเมชันกระพริบเบาๆ (ถ้าอยากใส่เพิ่มใน css)
+        animation: isLocked ? 'pulse 2s infinite' : 'none' 
       }}
       onMouseEnter={(e) => !isDisabled && (e.currentTarget.style.transform = 'scale(1.1)')}
       onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
@@ -45,7 +45,6 @@ const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [], lockedSeats =
     const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
     const seatKey = `${dateStr}_${startTime}_Seat${seat.number}`;
     
-    // เช็กว่าโต๊ะนี้อยู่ในรายการ lockedSeats ไหม และต้องไม่ใช่โต๊ะที่เราเลือกอยู่เอง
     const isLocked = lockedSeats.includes(seatKey) && String(selectedSeatId) !== String(seat.number);
     
     return (
@@ -78,6 +77,37 @@ const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [], lockedSeats =
           {rightSideSeats.map(renderSeat)}
         </div>
       </div>
+
+      {/* ✨ โซนคำอธิบายสัญลักษณ์ (Legend) เพิ่มใหม่ตรงนี้ครับ ✨ */}
+      <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          gap: '15px', 
+          marginTop: '25px', 
+          flexWrap: 'wrap',
+          padding: '15px',
+          backgroundColor: '#f8f9fa',
+          borderRadius: '8px',
+          border: '1px solid #eee'
+      }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <RiComputerFill color="#555" size={20} /> 
+              <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>ว่าง</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <RiUserFill color="#4CAF50" size={20} /> 
+              <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>กำลังเลือก</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <RiUserFill color="#facc15" size={20} /> 
+              <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>กำลังมีคนทำรายการ</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <RiUserFill color="#ef4444" size={20} /> 
+              <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>จองแล้ว</span>
+          </div>
+      </div>
+
     </div>
   );
 }

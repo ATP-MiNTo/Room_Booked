@@ -1,6 +1,7 @@
 import os
 import shutil
 import json
+import asyncio # 👉 เพิ่ม asyncio สำหรับทำงานเบื้องหลัง
 from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form, WebSocket, WebSocketDisconnect 
 from pydantic import BaseModel
 from datetime import datetime, date, time, timezone, timedelta
@@ -174,17 +175,22 @@ def get_all_reservations():
 
 
 # =================================================================
-# ระบบ WebSocket สำหรับล็อกที่นั่งชั่วคราว (สีเหลือง)
+# ระบบ WebSocket สำหรับล็อกที่นั่งชั่วคราว (สีเหลือง) พร้อมระบบตัดเวลา 4 นาที
 # =================================================================
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
         self.locked_seats = {} 
+        self.sweeper_task = None # 👉 ตัวแปรเก็บ รปภ. ดิจิทัล (Task)
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
         await websocket.send_json({"type": "INIT", "data": list(self.locked_seats.keys())})
+
+        # 👉 เริ่มเดินตรวจตราทันทีที่มีคนเปิดหน้าเว็บ (ถ้ายังไม่ได้เริ่ม)
+        if self.sweeper_task is None:
+            self.sweeper_task = asyncio.create_task(self.clear_expired_locks())
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
@@ -196,6 +202,27 @@ class ConnectionManager:
                 await connection.send_json(message)
             except:
                 pass
+
+    # ✨ ฟังก์ชัน รปภ. ตรวจตราเวลาทุกๆ 10 วินาที ✨
+    async def clear_expired_locks(self):
+        while True:
+            await asyncio.sleep(10) # รอ 10 วินาทีก่อนตรวจรอบถัดไป
+            now = datetime.now()
+            expired_keys = []
+            
+            # ตรวจสอบทุกโต๊ะที่ติดสีเหลืองอยู่
+            for seat_key, lock_time in list(self.locked_seats.items()):
+                # ถ้าเวลาผ่านไปเกิน 4 นาที (240 วินาที)
+                if now - lock_time > timedelta(minutes=4):
+                    expired_keys.append(seat_key)
+                    
+            # ทำการปลดล็อกโต๊ะที่หมดเวลา
+            for key in expired_keys:
+                if key in self.locked_seats:
+                    del self.locked_seats[key]
+                # ตะโกนบอกทุกคนในเว็บให้เอาสีเหลืองออก
+                await self.broadcast({"type": "UNLOCK", "seat_key": key})
+
 
 manager = ConnectionManager()
 
@@ -210,7 +237,8 @@ async def websocket_endpoint(websocket: WebSocket):
             seat_key = payload.get("seat_key")
 
             if action == "lock":
-                manager.locked_seats[seat_key] = True
+                # 👉 บันทึกเวลาที่กดจองลงไปแทนค่า True แบบเก่า
+                manager.locked_seats[seat_key] = datetime.now()
                 await manager.broadcast({"type": "LOCK", "seat_key": seat_key})
             
             elif action == "unlock":
