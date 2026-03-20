@@ -7,6 +7,7 @@ YOLOv8-based people detection with PC/seat usage logic for both live cameras and
 
 - Active live pipeline: `threaded.py`
 - Active offline pipeline: `tool/threaded_video_mode.py`
+- Active API service (log/data export): `api.py`
 - Main config source: `tool/threaded_config.yaml`
 - Legacy reference scripts are kept under `Bin/*.notuse`
 
@@ -21,6 +22,8 @@ YOLOv8-based people detection with PC/seat usage logic for both live cameras and
 - PC activity event logs (`USING_PC` / `NON_PC_ACTIVITY`)
 - Unattended/person-flag logic (`reason=1` / `reason=2`)
 - Realtime all-PC compact state CSV (`pc_name,pc_on,availble`)
+- REST API endpoints for booking website integration (local network)
+- WebSocket stream for realtime all-PC status push
 - Smoothed people counter (mode over time window)
 - Smoothed PC availability state (same mode-window idea)
 - Detection schedule gating (live mode)
@@ -32,6 +35,7 @@ YOLOv8-based people detection with PC/seat usage logic for both live cameras and
 
 ```text
 Room_Booked/
+├── api.py
 ├── threaded.py
 ├── yolov8n.pt
 ├── README.md
@@ -69,6 +73,12 @@ pip install -r tool\requirements.txt
 ```
 
 `tool/requirements.txt` includes `PyYAML` (required for config loading).
+
+For API service:
+
+```powershell
+pip install fastapi uvicorn
+```
 
 Optional helper installer:
 
@@ -139,6 +149,52 @@ Notes:
 - Outputs go under `VIDEO_LOG_BASE_DIR` (default `logs_video_mode`)
 
 For ROI reuse, keep video filenames aligned with ROI camera labels (example: `Front_right.mp4`, `Back_left.mp4`).
+
+---
+
+## Run API Service (Local Network)
+
+Start API server on port `8000`:
+
+```powershell
+uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+Alternative:
+
+```powershell
+python api.py
+```
+
+Open API docs:
+
+- `http://<SERVER_IP>:8000/docs`
+
+---
+
+## API Endpoints (api.py)
+
+- `GET /api/pc-status`
+    - Current all-PC compact state from `logs/pc_state_all.csv`.
+- `GET /api/people?camera=&date=&person_id=&limit=`
+    - Person snapshot/detection logs from per-camera daily CSVs.
+- `GET /api/pc-activity?camera=&pc_name=&date=&event_type=&limit=`
+    - PC activity events (`USING_PC`, `NON_PC_ACTIVITY`).
+- `GET /api/unattended?date=&pc_name=&reason=&limit=`
+    - Combined unattended/person-flag logs (`reason=1` / `reason=2`).
+- `GET /api/performance?date=`
+    - Session performance summary rows.
+- `GET /api/cameras`
+    - Camera/source summary + latest known performance row.
+- `GET /api/dates`
+    - Available date list with cameras that have data.
+- `WS /ws/pc-updates`
+    - Realtime push stream (about once per second) of all-PC status.
+
+WebSocket note:
+
+- Normal `GET` API: website requests data each time (polling).
+- WebSocket API: website keeps one open connection and receives pushed updates instantly.
 
 ---
 
