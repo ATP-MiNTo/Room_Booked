@@ -29,8 +29,8 @@ export default function AdminLayout({ children }) {
   const sidebarWidth = isMobile ? (isSidebarOpen ? '260px' : '0px') : (isSidebarOpen ? '260px' : '80px');
 
   const menuItems = [
+    { name: 'Booking History', icon: <RiFileList3Line size={24} />, path: '/admin/booking-history' },
     { name: 'Live Monitor', icon: <RiDashboardLine size={24} />, path: '/admin/monitor' },
-    { name: 'ประวัติการจอง', icon: <RiFileList3Line size={24} />, path: '/admin' },
   ];
 
   return (

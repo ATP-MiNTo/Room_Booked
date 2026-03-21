@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import AdminLayout from './AdminLayout'; 
 
-export default function BookingLogs() {
+export default function BookingHistory() {
   const [logs, setLogs] = useState([]);
   const [filters, setFilters] = useState({
     date: '', studentId: '', bookingDate: '', time: '', branch: ''

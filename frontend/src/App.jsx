@@ -1,9 +1,7 @@
 // src/App.jsx
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-
-// นำเข้าหน้าเว็บต่างๆ ที่เราสร้างไว้ในโฟลเดอร์ pages
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'; // 👈 เพิ่ม Navigate
 import Booking from './pages/Booking';
-import BookingLogs from './pages/admin/BookingLogs';
+import BookingHistory from './pages/admin/BookingHistory'; // 👈 เปลี่ยนชื่อไฟล์
 import Monitor from './pages/admin/Monitor';
 
 function App() {
@@ -13,11 +11,15 @@ function App() {
         {/* หน้าสำหรับผู้ใช้ทั่วไป (นักศึกษา) */}
         <Route path="/" element={<Booking />} />
         
-        {/* หน้าตารางประวัติการจอง สำหรับ Admin */}
-        <Route path="/admin" element={<BookingLogs />} />
+        {/* หน้า Admin Routes */}
+        {/* ถ้าเข้า URL /admin เฉยๆ ให้เด้งไปหน้า monitor อัตโนมัติ */}
+        <Route path="/admin" element={<Navigate to="/admin/monitor" replace />} />
         
-        {/* หน้า Live Monitor สรุปสถานะห้อง สำหรับ Admin */}
+        {/* หน้า Live Monitor (สรุปสถานะห้อง) */}
         <Route path="/admin/monitor" element={<Monitor />} />
+        
+        {/* หน้าประวัติการจอง (Booking History) */}
+        <Route path="/admin/booking-history" element={<BookingHistory />} />
       </Routes>
     </BrowserRouter>
   );
