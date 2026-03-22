@@ -1,7 +1,8 @@
+# C:\Users\user\Downloads\นิพนธ์\complab-reservation\backend\reservation.py
 import os
 import shutil
 import json
-import asyncio # 👉 เพิ่ม asyncio สำหรับทำงานเบื้องหลัง
+import asyncio
 from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form, WebSocket, WebSocketDisconnect 
 from pydantic import BaseModel
 from datetime import datetime, date, time, timezone, timedelta
@@ -28,15 +29,21 @@ class Reservation(BaseModel):
     start_time: time 
     end_time: time 
 
+# =================================================================
+# API: ดึงข้อมูลที่นั่งที่ถูกจองแล้ว (สำหรับหน้าแสดงผังที่นั่ง)
+# =================================================================
 @router.get("/booked-seats")
 def get_booked_seats(
     reserve_date: date = Query(...),
     start_time: time = Query(...),
     end_time: time = Query(...)
 ):
-    conn = get_db()
-    cur = conn.cursor()
+    conn = None
+    cur = None
     try:
+        conn = get_db()
+        cur = conn.cursor()
+        
         start_dt = datetime.combine(reserve_date, start_time)
         end_dt = datetime.combine(reserve_date, end_time)
 
@@ -49,11 +56,15 @@ def get_booked_seats(
         rows = cur.fetchall()
         return [str(row[0]) for row in rows]
     except Exception as e:
+        print(f"🔥 DATABASE ERROR (GET /booked-seats): {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        cur.close()
-        conn.close()
+        if cur: cur.close()
+        if conn: conn.close()
 
+# =================================================================
+# API: บันทึกการจองพร้อมอัปโหลดรูปภาพใบหน้า
+# =================================================================
 @router.post("/reserve-with-image")
 def reserve_with_image(
     seat_id: int = Form(...),
@@ -93,10 +104,12 @@ def reserve_with_image(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(image.file, buffer)
 
-    conn = get_db()
-    cur = conn.cursor()
+    conn = None
+    cur = None
 
     try:
+        conn = get_db()
+        cur = conn.cursor()
         cur.execute("BEGIN;")
 
         name_parts = user_name.strip().split(" ")
@@ -137,42 +150,52 @@ def reserve_with_image(
         }
 
     except HTTPException:
-        conn.rollback()
+        if conn: conn.rollback()
         raise
     except Exception as e:
-        conn.rollback()
+        if conn: conn.rollback()
+        print(f"🔥 DATABASE ERROR (POST /reserve-with-image): {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        cur.close()
-        conn.close()
+        if cur: cur.close()
+        if conn: conn.close()
 
+# =================================================================
+# API: ดึงประวัติการจองทั้งหมด (สำหรับหน้า Admin)
+# =================================================================
 @router.get("/reservations")
 def get_all_reservations():
-    conn = get_db()
-    cur = conn.cursor()
-
+    conn = None
+    cur = None
     try:
+        conn = get_db()
+        cur = conn.cursor()
+        
+        # ดึง student_id เพิ่ม และเรียงจากล่าสุดไปเก่าสุด (DESC)
         cur.execute("""
-            SELECT seat_no, start_time, end_time, image_name
+            SELECT seat_no, start_time, end_time, student_id, image_name
             FROM reservations
-            ORDER BY start_time
+            ORDER BY start_time DESC
         """)
         rows = cur.fetchall()
 
         return [
             {
                 "seat_id": r[0], 
-                "reserve_date": r[1].date() if r[1] else None, 
+                "reserve_date": str(r[1].date()) if r[1] else None, 
                 "start_time": str(r[1].time()) if r[1] else None, 
                 "end_time": str(r[2].time()) if r[2] else None,
-                "image_filename": r[3] 
+                "student_id": r[3],
+                "image_filename": r[4] 
             }
             for r in rows
         ]
+    except Exception as e:
+        print(f"🔥 DATABASE ERROR (GET /reservations): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
-        cur.close()
-        conn.close()
-
+        if cur: cur.close()
+        if conn: conn.close()
 
 # =================================================================
 # ระบบ WebSocket สำหรับล็อกที่นั่งชั่วคราว (สีเหลือง) พร้อมระบบตัดเวลา 4 นาที
@@ -181,14 +204,13 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
         self.locked_seats = {} 
-        self.sweeper_task = None # 👉 ตัวแปรเก็บ รปภ. ดิจิทัล (Task)
+        self.sweeper_task = None 
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
         await websocket.send_json({"type": "INIT", "data": list(self.locked_seats.keys())})
 
-        # 👉 เริ่มเดินตรวจตราทันทีที่มีคนเปิดหน้าเว็บ (ถ้ายังไม่ได้เริ่ม)
         if self.sweeper_task is None:
             self.sweeper_task = asyncio.create_task(self.clear_expired_locks())
 
@@ -203,24 +225,19 @@ class ConnectionManager:
             except:
                 pass
 
-    # ✨ ฟังก์ชัน รปภ. ตรวจตราเวลาทุกๆ 10 วินาที ✨
     async def clear_expired_locks(self):
         while True:
-            await asyncio.sleep(10) # รอ 10 วินาทีก่อนตรวจรอบถัดไป
+            await asyncio.sleep(10) 
             now = datetime.now()
             expired_keys = []
             
-            # ตรวจสอบทุกโต๊ะที่ติดสีเหลืองอยู่
             for seat_key, lock_time in list(self.locked_seats.items()):
-                # ถ้าเวลาผ่านไปเกิน 4 นาที (240 วินาที)
                 if now - lock_time > timedelta(minutes=4):
                     expired_keys.append(seat_key)
                     
-            # ทำการปลดล็อกโต๊ะที่หมดเวลา
             for key in expired_keys:
                 if key in self.locked_seats:
                     del self.locked_seats[key]
-                # ตะโกนบอกทุกคนในเว็บให้เอาสีเหลืองออก
                 await self.broadcast({"type": "UNLOCK", "seat_key": key})
 
 
@@ -237,7 +254,6 @@ async def websocket_endpoint(websocket: WebSocket):
             seat_key = payload.get("seat_key")
 
             if action == "lock":
-                # 👉 บันทึกเวลาที่กดจองลงไปแทนค่า True แบบเก่า
                 manager.locked_seats[seat_key] = datetime.now()
                 await manager.broadcast({"type": "LOCK", "seat_key": seat_key})
             

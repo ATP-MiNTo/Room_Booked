@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   RiMenuFoldLine, RiMenuUnfoldLine, 
   RiDashboardLine, RiFileList3Line, 
-  RiLogoutBoxRLine, RiMenuLine // 👈 เพิ่มไอคอนเมนู 3 ขีด
+  RiLogoutBoxRLine, RiMenuLine 
 } from 'react-icons/ri';
 
 export default function AdminLayout({ children }) {
@@ -112,7 +112,10 @@ export default function AdminLayout({ children }) {
 
         {/* ปุ่มออกจากระบบ */}
         <div 
-          onClick={() => navigate('/')}
+          onClick={() => {
+            localStorage.removeItem('adminToken'); // 🗑️ ฉีกบัตรผ่านทิ้ง
+            navigate('/admin/login'); // 🏃‍♂️ เด้งกลับไปหน้า Login
+          }}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: (isSidebarOpen || isMobile) ? 'flex-start' : 'center',
             padding: '20px', cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.1)',
