@@ -12,55 +12,8 @@ from collections import Counter, deque
 
 
 # -------------------------------------Configuration--------------------------------------------
-# Configuration is loaded from YAML, with these defaults as fallback.
-DEFAULT_CONFIG = {
-    # Camera settings
-    "CAM_INDEXES": [0, 1, 2, 3],
-    "CAM_NAMES": {
-        0: "Front_right",
-        1: "Front_left",
-        2: "Back_left",
-        3: "Back_right",
-    },
-    "FRAME_WIDTH": 1280,
-    "FRAME_HEIGHT": 720,
-    # Window display settings
-    "SHOW_WINDOWS": "Show",  # Show or Hide
-    "WINDOWS_WIDTH": 960,
-    "WINDOWS_HEIGHT": 540,
-    # Detection settings
-    "CONF_THRESHOLD": 0.4,
-    "IOU_THRESHOLD": 0.4,
-    "SAVE_INTERVAL_SEC": 30,
-    # Detection schedule settings (24-hour format, local time)
-    "DETECTION_START_HOUR_24": 8,
-    "DETECTION_END_HOUR_24": 18,
-    # PC ROI settings
-    "ENABLE_PC_ROI": True,
-    "ENABLE_MONITOR_ROI": True,
-    "PERSON_OVERLAP_DWELL_SEC": 10.0,
-    "PC_ON_NO_PERSON_DWELL_SEC": 300.0,
-    "LATEST_PERSON_FLAG_LOOKBACK_SEC": 900.0,
-    "MONITOR_ON_MEAN_THRESHOLD": 70.0,
-    "MONITOR_ON_STD_THRESHOLD": 12.0,
-    "MONITOR_STATE_STABLE_FRAMES": 3,
-    "ROI_CONFIG_DIR": os.path.join("tool", "roi_config"),
-    "CSV_SUFFIX": "_roi.csv",
-    "MONITOR_CSV_SUFFIX": "_monitor_roi.csv",
-    # Tracking settings
-    "ENABLE_RESOURCE_MONITOR": False,
-    "PROCESS_EVERY_N_FRAMES": 2,
-    # Smoothing settings
-    "SMOOTH_WINDOW_SEC": 5.0,
-    # Realtime PC-state CSV settings
-    "ENABLE_REALTIME_PC_STATE_CSV": True,
-    "REALTIME_PC_STATE_WRITE_INTERVAL_SEC": 1.0,
-    # Paths
-    "MODEL_PATH": "yolov8n.pt",
-    "LOG_BASE_DIR": "logs",
-    "ROI_IMAGES_SUBDIR": "roi_images",
-    "PERF_SUMMARY_FILENAME": "performance_summary.csv",
-}
+# Configuration is loaded from YAML only.
+# Missing file/keys are treated as configuration errors.
 
 CONFIG_FILE_PATH = os.path.join("tool", "threaded_config.yaml")
 
@@ -77,11 +30,15 @@ def _to_cam_name_map(raw_map):
     return mapped
 
 
+def _require_config_value(config, key):
+    if key not in config:
+        raise KeyError(f"Missing required config key '{key}' in {CONFIG_FILE_PATH}")
+    return config[key]
+
+
 def load_runtime_config(config_path):
-    config = dict(DEFAULT_CONFIG)
     if not os.path.exists(config_path):
-        print(f"Config file not found, using defaults: {config_path}")
-        return config
+        raise FileNotFoundError(f"Config file not found: {config_path}")
 
     try:
         import yaml
@@ -89,78 +46,93 @@ def load_runtime_config(config_path):
         with open(config_path, "r", encoding="utf-8") as config_file:
             loaded = yaml.safe_load(config_file) or {}
         if not isinstance(loaded, dict):
-            print(f"Invalid config format in {config_path}; expected mapping, using defaults")
-            return config
-
-        for key, value in loaded.items():
-            if key in config:
-                config[key] = value
-
-        print(f"Loaded config from {config_path}")
+            raise ValueError(f"Invalid config format in {config_path}; expected a YAML mapping")
     except Exception as e:
-        print(f"Failed to load config from {config_path}: {e}")
-        print("Using built-in defaults")
+        raise RuntimeError(f"Failed to load config from {config_path}: {e}") from e
 
-    return config
+    print(f"Loaded config from {config_path}")
+    return loaded
 
 
 CONFIG = load_runtime_config(CONFIG_FILE_PATH)
 
 # Camera settings
-CAM_INDEXES = [int(idx) for idx in CONFIG.get("CAM_INDEXES", DEFAULT_CONFIG["CAM_INDEXES"])]
-CAM_NAMES = _to_cam_name_map(CONFIG.get("CAM_NAMES", DEFAULT_CONFIG["CAM_NAMES"])) or dict(DEFAULT_CONFIG["CAM_NAMES"])
-FRAME_WIDTH = int(CONFIG.get("FRAME_WIDTH", DEFAULT_CONFIG["FRAME_WIDTH"]))
-FRAME_HEIGHT = int(CONFIG.get("FRAME_HEIGHT", DEFAULT_CONFIG["FRAME_HEIGHT"]))
+CAM_INDEXES = [int(idx) for idx in _require_config_value(CONFIG, "CAM_INDEXES")]
+CAM_NAMES = _to_cam_name_map(_require_config_value(CONFIG, "CAM_NAMES"))
+if not CAM_NAMES:
+    raise ValueError(f"'CAM_NAMES' must be a non-empty map in {CONFIG_FILE_PATH}")
+FRAME_WIDTH = int(_require_config_value(CONFIG, "FRAME_WIDTH"))
+FRAME_HEIGHT = int(_require_config_value(CONFIG, "FRAME_HEIGHT"))
 
 # Window display settings
-SHOW_WINDOWS = str(CONFIG.get("SHOW_WINDOWS", DEFAULT_CONFIG["SHOW_WINDOWS"]))
-Windows_width = int(CONFIG.get("WINDOWS_WIDTH", DEFAULT_CONFIG["WINDOWS_WIDTH"]))
-Windows_height = int(CONFIG.get("WINDOWS_HEIGHT", DEFAULT_CONFIG["WINDOWS_HEIGHT"]))
+SHOW_WINDOWS = str(_require_config_value(CONFIG, "SHOW_WINDOWS")).strip().lower()
+Windows_width = int(_require_config_value(CONFIG, "WINDOWS_WIDTH"))
+Windows_height = int(_require_config_value(CONFIG, "WINDOWS_HEIGHT"))
 
 # Detection settings
-CONF_THRESHOLD = float(CONFIG.get("CONF_THRESHOLD", DEFAULT_CONFIG["CONF_THRESHOLD"]))
-IOU_THRESHOLD = float(CONFIG.get("IOU_THRESHOLD", DEFAULT_CONFIG["IOU_THRESHOLD"]))
-SAVE_INTERVAL_SEC = float(CONFIG.get("SAVE_INTERVAL_SEC", DEFAULT_CONFIG["SAVE_INTERVAL_SEC"]))
+CONF_THRESHOLD = float(_require_config_value(CONFIG, "CONF_THRESHOLD"))
+IOU_THRESHOLD = float(_require_config_value(CONFIG, "IOU_THRESHOLD"))
+SAVE_INTERVAL_SEC = float(_require_config_value(CONFIG, "SAVE_INTERVAL_SEC"))
 
 # Detection schedule settings
-DETECTION_START_HOUR_24 = int(CONFIG.get("DETECTION_START_HOUR_24", DEFAULT_CONFIG["DETECTION_START_HOUR_24"]))
-DETECTION_END_HOUR_24 = int(CONFIG.get("DETECTION_END_HOUR_24", DEFAULT_CONFIG["DETECTION_END_HOUR_24"]))
+DETECTION_START_HOUR_24 = int(_require_config_value(CONFIG, "DETECTION_START_HOUR_24"))
+DETECTION_END_HOUR_24 = int(_require_config_value(CONFIG, "DETECTION_END_HOUR_24"))
 
 # PC ROI settings
-ENABLE_PC_ROI = bool(CONFIG.get("ENABLE_PC_ROI", DEFAULT_CONFIG["ENABLE_PC_ROI"]))
-ENABLE_MONITOR_ROI = bool(CONFIG.get("ENABLE_MONITOR_ROI", DEFAULT_CONFIG["ENABLE_MONITOR_ROI"]))
-PERSON_OVERLAP_DWELL_SEC = float(CONFIG.get("PERSON_OVERLAP_DWELL_SEC", DEFAULT_CONFIG["PERSON_OVERLAP_DWELL_SEC"]))
-PC_ON_NO_PERSON_DWELL_SEC = float(CONFIG.get("PC_ON_NO_PERSON_DWELL_SEC", DEFAULT_CONFIG["PC_ON_NO_PERSON_DWELL_SEC"]))
-LATEST_PERSON_FLAG_LOOKBACK_SEC = float(
-    CONFIG.get("LATEST_PERSON_FLAG_LOOKBACK_SEC", DEFAULT_CONFIG["LATEST_PERSON_FLAG_LOOKBACK_SEC"])
-)
-MONITOR_ON_MEAN_THRESHOLD = float(CONFIG.get("MONITOR_ON_MEAN_THRESHOLD", DEFAULT_CONFIG["MONITOR_ON_MEAN_THRESHOLD"]))
-MONITOR_ON_STD_THRESHOLD = float(CONFIG.get("MONITOR_ON_STD_THRESHOLD", DEFAULT_CONFIG["MONITOR_ON_STD_THRESHOLD"]))
-MONITOR_STATE_STABLE_FRAMES = int(CONFIG.get("MONITOR_STATE_STABLE_FRAMES", DEFAULT_CONFIG["MONITOR_STATE_STABLE_FRAMES"]))
-ROI_CONFIG_DIR = os.path.normpath(str(CONFIG.get("ROI_CONFIG_DIR", DEFAULT_CONFIG["ROI_CONFIG_DIR"])))
-CSV_SUFFIX = str(CONFIG.get("CSV_SUFFIX", DEFAULT_CONFIG["CSV_SUFFIX"]))
-MONITOR_CSV_SUFFIX = str(CONFIG.get("MONITOR_CSV_SUFFIX", DEFAULT_CONFIG["MONITOR_CSV_SUFFIX"]))
+ENABLE_PC_ROI = bool(_require_config_value(CONFIG, "ENABLE_PC_ROI"))
+ENABLE_MONITOR_ROI = bool(_require_config_value(CONFIG, "ENABLE_MONITOR_ROI"))
+PERSON_OVERLAP_DWELL_SEC = float(_require_config_value(CONFIG, "PERSON_OVERLAP_DWELL_SEC"))
+PC_ON_NO_PERSON_DWELL_SEC = float(_require_config_value(CONFIG, "PC_ON_NO_PERSON_DWELL_SEC"))
+LATEST_PERSON_FLAG_LOOKBACK_SEC = float(_require_config_value(CONFIG, "LATEST_PERSON_FLAG_LOOKBACK_SEC"))
+MONITOR_ON_MEAN_THRESHOLD = float(_require_config_value(CONFIG, "MONITOR_ON_MEAN_THRESHOLD"))
+MONITOR_ON_STD_THRESHOLD = float(_require_config_value(CONFIG, "MONITOR_ON_STD_THRESHOLD"))
+MONITOR_STATE_STABLE_FRAMES = int(_require_config_value(CONFIG, "MONITOR_STATE_STABLE_FRAMES"))
+ROI_CONFIG_DIR = os.path.normpath(str(_require_config_value(CONFIG, "ROI_CONFIG_DIR")))
+CSV_SUFFIX = str(_require_config_value(CONFIG, "CSV_SUFFIX"))
+MONITOR_CSV_SUFFIX = str(_require_config_value(CONFIG, "MONITOR_CSV_SUFFIX"))
 
 # Tracking and smoothing settings
-ENABLE_RESOURCE_MONITOR = bool(CONFIG.get("ENABLE_RESOURCE_MONITOR", DEFAULT_CONFIG["ENABLE_RESOURCE_MONITOR"]))
-PROCESS_EVERY_N_FRAMES = max(1, int(CONFIG.get("PROCESS_EVERY_N_FRAMES", DEFAULT_CONFIG["PROCESS_EVERY_N_FRAMES"])))
-SMOOTH_WINDOW_SEC = max(0.0, float(CONFIG.get("SMOOTH_WINDOW_SEC", DEFAULT_CONFIG["SMOOTH_WINDOW_SEC"])))
+ENABLE_RESOURCE_MONITOR = bool(_require_config_value(CONFIG, "ENABLE_RESOURCE_MONITOR"))
+PROCESS_EVERY_N_FRAMES = max(1, int(_require_config_value(CONFIG, "PROCESS_EVERY_N_FRAMES")))
+FRAME_CAP_FPS = max(0.0, float(_require_config_value(CONFIG, "FRAME_CAP_FPS")))
+FRAME_CAP_INTERVAL_SEC = (1.0 / FRAME_CAP_FPS) if FRAME_CAP_FPS > 0 else 0.0
+TRACK_MATCH_DISTANCE_PX = max(
+    1.0,
+    float(_require_config_value(CONFIG, "TRACK_MATCH_DISTANCE_PX")),
+)
+TRACK_REID_EXPAND_PX_PER_SEC = max(
+    0.0,
+    float(_require_config_value(CONFIG, "TRACK_REID_EXPAND_PX_PER_SEC")),
+)
+TRACK_MAX_MISSING_SEC = max(
+    0.0,
+    float(_require_config_value(CONFIG, "TRACK_MAX_MISSING_SEC_LIVE")),
+)
+TRACK_STALE_FORGET_SEC = max(
+    TRACK_MAX_MISSING_SEC,
+    float(_require_config_value(CONFIG, "TRACK_STALE_FORGET_SEC")),
+)
+TRACK_VELOCITY_SMOOTHING = min(
+    0.99,
+    max(0.0, float(_require_config_value(CONFIG, "TRACK_VELOCITY_SMOOTHING"))),
+)
+TRACK_MAX_PREDICTION_SPEED_PX_PER_SEC = max(
+    1.0,
+    float(_require_config_value(CONFIG, "TRACK_MAX_PREDICTION_SPEED_PX_PER_SEC")),
+)
+SMOOTH_WINDOW_SEC = max(0.0, float(_require_config_value(CONFIG, "SMOOTH_WINDOW_SEC")))
 
 # Realtime PC-state CSV settings
-ENABLE_REALTIME_PC_STATE_CSV = bool(
-    CONFIG.get("ENABLE_REALTIME_PC_STATE_CSV", DEFAULT_CONFIG["ENABLE_REALTIME_PC_STATE_CSV"])
-)
-REALTIME_PC_STATE_WRITE_INTERVAL_SEC = float(
-    CONFIG.get("REALTIME_PC_STATE_WRITE_INTERVAL_SEC", DEFAULT_CONFIG["REALTIME_PC_STATE_WRITE_INTERVAL_SEC"])
-)
+ENABLE_REALTIME_PC_STATE_CSV = bool(_require_config_value(CONFIG, "ENABLE_REALTIME_PC_STATE_CSV"))
+REALTIME_PC_STATE_WRITE_INTERVAL_SEC = float(_require_config_value(CONFIG, "REALTIME_PC_STATE_WRITE_INTERVAL_SEC"))
 
 # Paths
-MODEL_PATH = str(CONFIG.get("MODEL_PATH", DEFAULT_CONFIG["MODEL_PATH"]))
-LOG_BASE_DIR = os.path.normpath(str(CONFIG.get("LOG_BASE_DIR", DEFAULT_CONFIG["LOG_BASE_DIR"])))
-ROI_BASE_DIR = os.path.join(LOG_BASE_DIR, str(CONFIG.get("ROI_IMAGES_SUBDIR", DEFAULT_CONFIG["ROI_IMAGES_SUBDIR"])))
+MODEL_PATH = str(_require_config_value(CONFIG, "MODEL_PATH"))
+LOG_BASE_DIR = os.path.normpath(str(_require_config_value(CONFIG, "LOG_BASE_DIR")))
+ROI_BASE_DIR = os.path.join(LOG_BASE_DIR, str(_require_config_value(CONFIG, "ROI_IMAGES_SUBDIR")))
 PERF_SUMMARY_FILE = os.path.join(
     LOG_BASE_DIR,
-    str(CONFIG.get("PERF_SUMMARY_FILENAME", DEFAULT_CONFIG["PERF_SUMMARY_FILENAME"])),
+    str(_require_config_value(CONFIG, "PERF_SUMMARY_FILENAME")),
 )
 
 # ----------------------------------------------------------------------------------------------
@@ -277,19 +249,69 @@ def distance(box1, box2):
     return ((cx1 - cx2) ** 2 + (cy1 - cy2) ** 2) ** 0.5
 
 
-def match_box_to_person(box, tracked_persons):
-    """Find closest tracked person to this box."""
-    min_dist = 100  # threshold
+def box_center(box):
+    return ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
+
+
+def predict_track_box(last_box, velocity, dt_sec):
+    if dt_sec <= 0:
+        return last_box
+
+    vx, vy = velocity or (0.0, 0.0)
+    max_shift = TRACK_MAX_PREDICTION_SPEED_PX_PER_SEC * dt_sec
+    dx = max(-max_shift, min(max_shift, vx * dt_sec))
+    dy = max(-max_shift, min(max_shift, vy * dt_sec))
+    return (
+        last_box[0] + dx,
+        last_box[1] + dy,
+        last_box[2] + dx,
+        last_box[3] + dy,
+    )
+
+
+def match_box_to_person(box, tracked_persons, now_ts, unavailable_ids=None):
+    """Find the best tracked person using momentum-aware position prediction."""
+    blocked_ids = unavailable_ids or set()
+    best_score = float("inf")
     matched_id = None
 
     for pid, pdata in tracked_persons.items():
-        if "last_box" in pdata:
-            dist = distance(box, pdata["last_box"])
-            if dist < min_dist:
-                min_dist = dist
-                matched_id = pid
+        if pid in blocked_ids:
+            continue
+
+        last_box = pdata.get("last_box")
+        if not last_box:
+            continue
+
+        last_seen_ts = float(pdata.get("last_seen_ts", now_ts))
+        missing_sec = max(0.0, float(now_ts) - last_seen_ts)
+        if missing_sec > TRACK_MAX_MISSING_SEC:
+            continue
+
+        predicted_box = predict_track_box(last_box, pdata.get("velocity"), missing_sec)
+        dist = distance(box, predicted_box)
+        allowed_dist = TRACK_MATCH_DISTANCE_PX + (TRACK_REID_EXPAND_PX_PER_SEC * missing_sec)
+
+        if dist <= allowed_dist and dist < best_score:
+            best_score = dist
+            matched_id = pid
 
     return matched_id
+
+
+def prune_stale_tracks(tracked_persons, now_ts):
+    stale_ids = []
+    for pid, pdata in tracked_persons.items():
+        last_seen_ts = pdata.get("last_seen_ts")
+        if last_seen_ts is None:
+            continue
+
+        missing_sec = max(0.0, float(now_ts) - float(last_seen_ts))
+        if missing_sec > TRACK_STALE_FORGET_SEC:
+            stale_ids.append(pid)
+
+    for pid in stale_ids:
+        tracked_persons.pop(pid, None)
 
 
 def load_camera_rois(cam_label, csv_suffix=CSV_SUFFIX):
@@ -634,6 +656,33 @@ def realtime_pc_state_writer(cams, csv_path, stop_event, interval_sec=1.0):
         print(f"Failed to finalize realtime PC-state CSV: {e}")
 
 
+def cleanup_empty_log_folders(log_dir):
+    """Delete empty folders in the log directory and their empty parent directories."""
+    if not os.path.exists(log_dir):
+        return
+    
+    try:
+        # Walk through all subdirectories bottom-up
+        for root, dirs, files in os.walk(log_dir, topdown=False):
+            for folder in dirs:
+                folder_path = os.path.join(root, folder)
+                try:
+                    # Check if directory is empty
+                    if not os.listdir(folder_path):
+                        os.rmdir(folder_path)
+                        print(f"Deleted empty log folder: {folder_path}")
+                except Exception as e:
+                    # Silently ignore errors for individual folders
+                    pass
+        
+        # Check if the main log directory is also empty and delete if it is
+        if os.path.exists(log_dir) and not os.listdir(log_dir):
+            os.rmdir(log_dir)
+            print(f"Deleted empty log directory: {log_dir}")
+    except Exception as e:
+        print(f"Error during cleanup of empty log folders: {e}")
+
+
 def build_session_config_string(cams):
     """Build session configuration string for logging: file | hardware | PC ROI | Monitor ROI | SHOW_WINDOWS"""
     # Determine hardware
@@ -732,95 +781,101 @@ def create_daily_summary_report(cams, day_tag, output_dir):
         print(f"Failed to create daily summary report: {e}")
         return None
 
-# Create base directories
-os.makedirs(LOG_BASE_DIR, exist_ok=True)
-os.makedirs(ROI_BASE_DIR, exist_ok=True)
+def build_camera_states():
+    # Create base directories
+    os.makedirs(LOG_BASE_DIR, exist_ok=True)
+    os.makedirs(ROI_BASE_DIR, exist_ok=True)
 
-# Per-camera state
-cams = {}
+    cams = {}
+    for cam_idx in CAM_INDEXES:
+        cap = cv2.VideoCapture(cam_idx)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+        cam_name = CAM_NAMES.get(cam_idx, f"Cam {cam_idx}")
+        cam_label = to_safe_label(cam_name)
 
-for cam_idx in CAM_INDEXES:
-    cap = cv2.VideoCapture(cam_idx)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-    cam_name = CAM_NAMES.get(cam_idx, f"Cam {cam_idx}")
-    cam_label = to_safe_label(cam_name)
-    
-    # load PC ROI polygons if enabled
-    pc_rois = []
-    if ENABLE_PC_ROI:
-        pc_rois = load_camera_rois(cam_label)
-        if pc_rois:
-            print(f"{cam_name}: loaded {len(pc_rois)} PC ROI(s)")
+        # load PC ROI polygons if enabled
+        pc_rois = []
+        if ENABLE_PC_ROI:
+            pc_rois = load_camera_rois(cam_label)
+            if pc_rois:
+                print(f"{cam_name}: loaded {len(pc_rois)} PC ROI(s)")
 
-    # load monitor ROI polygons if enabled
-    monitor_rois = []
-    if ENABLE_MONITOR_ROI:
-        monitor_rois = load_camera_rois(cam_label, MONITOR_CSV_SUFFIX)
-        if monitor_rois:
-            print(f"{cam_name}: loaded {len(monitor_rois)} monitor ROI(s)")
+        # load monitor ROI polygons if enabled
+        monitor_rois = []
+        if ENABLE_MONITOR_ROI:
+            monitor_rois = load_camera_rois(cam_label, MONITOR_CSV_SUFFIX)
+            if monitor_rois:
+                print(f"{cam_name}: loaded {len(monitor_rois)} monitor ROI(s)")
 
-    pc_states = init_pc_states(pc_rois, monitor_rois)
-    
-    cams[cam_idx] = {
-        "cap": cap,
-        "tracked_persons": {},
-        "person_id_counter": 0,
-        "used_ids": set(),
-        "logs": [],
-        "window": f"YOLO Person Detection ({cam_name})",
-        "roi_dir": os.path.join(ROI_BASE_DIR, cam_label),
-        "log_dir": os.path.join(LOG_BASE_DIR, cam_label),
-        "last_frame_time": None,
-        "fps": 0.0,
-        # process every N frames (1 = every frame). Increase to 2 or 3 to reduce inference load.
-        "process_every_n_frames": PROCESS_EVERY_N_FRAMES,
-        "frame_counter": 0,
-        # cache last annotated frame to display when skipping inference
-        "last_annotated_frame": None,
-        "person_count_history": deque(),
-        "person_count_raw": 0,
-        "person_count_smoothed": 0,
-        "detection_active_last": None,
-        # performance tracking
-        "frames_seen": 0,
-        "total_latency_ms": 0.0,
-        "inference_runs": 0,
-        "total_inference_time_ms": 0.0,
-        "first_frame_time": None,
-        "name": cam_name,
-        "label": cam_label,
-        "pc_rois": pc_rois,
-        "monitor_rois": monitor_rois,
-        "pc_states": pc_states,
-        "pc_event_logs": [],
-        "pc_unattended_logs": [],
-    }
-    os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
-    os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
+        pc_states = init_pc_states(pc_rois, monitor_rois)
+        cams[cam_idx] = {
+            "cap": cap,
+            "tracked_persons": {},
+            "person_id_counter": 0,
+            "used_ids": set(),
+            "logs": [],
+            "window": f"YOLO Person Detection ({cam_name})",
+            "roi_dir": os.path.join(ROI_BASE_DIR, cam_label),
+            "log_dir": os.path.join(LOG_BASE_DIR, cam_label),
+            "last_frame_time": None,
+            "fps": 0.0,
+            # process every N frames (1 = every frame). Increase to 2 or 3 to reduce inference load.
+            "process_every_n_frames": PROCESS_EVERY_N_FRAMES,
+            "frame_counter": 0,
+            # cache last annotated frame to display when skipping inference
+            "last_annotated_frame": None,
+            "person_count_history": deque(),
+            "person_count_raw": 0,
+            "person_count_smoothed": 0,
+            "detection_active_last": None,
+            # performance tracking
+            "frames_seen": 0,
+            "total_latency_ms": 0.0,
+            "inference_runs": 0,
+            "total_inference_time_ms": 0.0,
+            "first_frame_time": None,
+            "name": cam_name,
+            "label": cam_label,
+            "pc_rois": pc_rois,
+            "monitor_rois": monitor_rois,
+            "pc_states": pc_states,
+            "pc_event_logs": [],
+            "pc_unattended_logs": [],
+        }
+        os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
+        os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
 
-# start resource monitor if enabled
-monitor_stop = None
-monitor_thread = None
-if ENABLE_RESOURCE_MONITOR:
-    try:
-        from tool.resource_monitor import start_resource_monitor, stop_resource_monitor
-
-        monitor_stop, monitor_thread = start_resource_monitor(cams, device=device, sample_interval=1.0)
-        print("Resource monitor started")
-    except Exception as e:
-        print(f"Failed to start resource monitor: {e}")
+    return cams
 
 
-print("=== Auto ID Assignment (4 Cams) ===")
-print("Each detected person gets a random 3-digit ID automatically")
-print(f"ROIs saved every {SAVE_INTERVAL_SEC:.0f} seconds to roi_images/<CAM_NAME>/<ID>/")
-print(f"YOLO detection schedule: {DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00 (local time)")
-print(f"Person overlap dwell threshold: {PERSON_OVERLAP_DWELL_SEC:.0f}s")
-print(f"PC ON + no person unattended threshold: {PC_ON_NO_PERSON_DWELL_SEC/60:.0f} minutes")
-print(f"Smoothing window (mode): {SMOOTH_WINDOW_SEC:.1f}s")
-print("Press 'q' to quit")
-print("===================================\n")
+def start_resource_monitor_if_enabled(cams):
+    monitor_stop = None
+    monitor_thread = None
+    if ENABLE_RESOURCE_MONITOR:
+        try:
+            from tool.resource_monitor import start_resource_monitor
+
+            monitor_stop, monitor_thread = start_resource_monitor(cams, device=device, sample_interval=1.0)
+            print("Resource monitor started")
+        except Exception as e:
+            print(f"Failed to start resource monitor: {e}")
+
+    return monitor_stop, monitor_thread
+
+
+def print_session_banner():
+    print("=== Auto ID Assignment (4 Cams) ===")
+    print("Each detected person gets a random 3-digit ID automatically")
+    print(f"ROIs saved every {SAVE_INTERVAL_SEC:.0f} seconds to roi_images/<CAM_NAME>/<ID>/")
+    print(f"YOLO detection schedule: {DETECTION_START_HOUR_24:02d}:00-{DETECTION_END_HOUR_24:02d}:00 (local time)")
+    print(f"Person overlap dwell threshold: {PERSON_OVERLAP_DWELL_SEC:.0f}s")
+    print(f"PC ON + no person unattended threshold: {PC_ON_NO_PERSON_DWELL_SEC/60:.0f} minutes")
+    print(f"Smoothing window (mode): {SMOOTH_WINDOW_SEC:.1f}s")
+    if FRAME_CAP_FPS > 0:
+        print(f"Frame cap: {FRAME_CAP_FPS:.1f} FPS")
+    print("Press 'q' to quit")
+    print("===================================\n")
 
 
 # --- Threaded camera processing ---
@@ -883,6 +938,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     cam_data["first_frame_time"] = frame_start
 
                 pc_to_person = {}
+                matched_track_ids = set()
 
                 for box in results[0].boxes:
                     cls = int(box.cls[0])
@@ -895,10 +951,32 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                         # determine which PC this person is in
                         current_pc = get_pc_for_box(current_box, cam_data["pc_rois"]) if ENABLE_PC_ROI else None
                         
-                        matched_id = match_box_to_person(current_box, cam_data["tracked_persons"])
+                        matched_id = match_box_to_person(
+                            current_box,
+                            cam_data["tracked_persons"],
+                            frame_start,
+                            unavailable_ids=matched_track_ids,
+                        )
                         if matched_id is not None:
+                            matched_track_ids.add(matched_id)
                             pdata = cam_data["tracked_persons"][matched_id]
+                            prev_box = pdata.get("last_box", current_box)
+                            prev_seen_ts = float(pdata.get("last_seen_ts", frame_start))
+                            dt_track = max(1e-6, frame_start - prev_seen_ts)
+                            prev_cx, prev_cy = box_center(prev_box)
+                            curr_cx, curr_cy = box_center(current_box)
+                            measured_vx = (curr_cx - prev_cx) / dt_track
+                            measured_vy = (curr_cy - prev_cy) / dt_track
+                            old_vx, old_vy = pdata.get("velocity", (0.0, 0.0))
+                            keep = TRACK_VELOCITY_SMOOTHING
+                            add = 1.0 - keep
+                            pdata["velocity"] = (
+                                (old_vx * keep) + (measured_vx * add),
+                                (old_vy * keep) + (measured_vy * add),
+                            )
                             pdata["last_box"] = current_box
+                            pdata["last_seen_ts"] = frame_start
+                            pdata["missing_since_ts"] = None
                             person_name = pdata.get("name", f"Person {matched_id}")
                             
                             # PC dwell-time tracking
@@ -961,7 +1039,11 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                                 "current_pc": current_pc,
                                 "pc_enter_time": frame_start if current_pc else None,
                                 "assigned_pc": None,
+                                "velocity": (0.0, 0.0),
+                                "last_seen_ts": frame_start,
+                                "missing_since_ts": None,
                             }
+                            matched_track_ids.add(matched_id)
                             person_name = random_id
                             print(f"{cam_data['name']}: New person detected! Assigned ID: {random_id}")
                         color = (0, 255, 0)
@@ -973,6 +1055,14 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                             prev = pc_to_person.get(current_pc)
                             if prev is None or conf > prev[0]:
                                 pc_to_person[current_pc] = (conf, person_name)
+
+                for pid, pdata in cam_data["tracked_persons"].items():
+                    if pid in matched_track_ids:
+                        continue
+                    if pdata.get("missing_since_ts") is None:
+                        pdata["missing_since_ts"] = frame_start
+
+                prune_stale_tracks(cam_data["tracked_persons"], frame_start)
 
                 pc_to_person_map = {pc_name: data[1] for pc_name, data in pc_to_person.items()}
                 update_pc_states_from_monitor(frame, cam_data.get("monitor_rois", []), cam_data.get("pc_states", {}), frame_start)
@@ -1011,16 +1101,24 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 
             frame_end = time.time()
             latency_ms = (frame_end - frame_start) * 1000.0
+            prev_latency_ms = float(cam_data.get("last_latency_ms", latency_ms))
+            display_latency_ms = (prev_latency_ms + latency_ms) / 2.0
+            cam_data["last_latency_ms"] = latency_ms
+
+            prev_fps = float(cam_data.get("fps", 0.0))
+            current_fps = prev_fps
             cam_data["frames_seen"] += 1
             cam_data["total_latency_ms"] += latency_ms
             if cam_data["last_frame_time"] is not None:
                 dt = frame_end - cam_data["last_frame_time"]
                 if dt > 0:
-                    cam_data["fps"] = 1.0 / dt
+                    current_fps = 1.0 / dt
+            cam_data["fps"] = current_fps
+            display_fps = (prev_fps + current_fps) / 2.0
             cam_data["last_frame_time"] = frame_end
-            cv2.putText(frame, f"FPS: {cam_data['fps']:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-            cv2.putText(frame, f"Latency: {latency_ms:.1f} ms", (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-            if SHOW_WINDOWS == "Show":
+            cv2.putText(frame, f"FPS: {display_fps:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+            cv2.putText(frame, f"Latency: {display_latency_ms:.1f} ms", (20, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+            if SHOW_WINDOWS == "show":
                 display_frame = cv2.resize(frame, (Windows_width, Windows_height))
                 cv2.imshow(cam_data["window"], display_frame)
                 if cv2.getWindowProperty(cam_data["window"], cv2.WND_PROP_VISIBLE) < 1:
@@ -1028,213 +1126,255 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     stop_event.set()
                     break
-            elif SHOW_WINDOWS == "Hide":
+            elif SHOW_WINDOWS == "hide":
                 pass
+
+            if FRAME_CAP_INTERVAL_SEC > 0:
+                remaining_sleep = FRAME_CAP_INTERVAL_SEC - (time.time() - frame_start)
+                if remaining_sleep > 0:
+                    time.sleep(remaining_sleep)
     except KeyboardInterrupt:
         print(f"\nInterrupted by user (KeyboardInterrupt) in {cam_data['name']}")
 
-# --- Start threads for each camera ---
-stop_event = threading.Event()
-run_start_day_tag = current_day_tag()
-pc_state_all_csv = os.path.join(LOG_BASE_DIR, "pc_state_all.csv")
+def start_realtime_pc_state_writer(cams, stop_event):
+    pc_state_all_csv = os.path.join(LOG_BASE_DIR, "pc_state_all.csv")
+    pc_state_writer_thread = None
+    if ENABLE_REALTIME_PC_STATE_CSV:
+        # create file immediately so downstream readers can open it before first update cycle
+        write_pc_state_csv(cams, pc_state_all_csv)
+        pc_state_writer_thread = threading.Thread(
+            target=realtime_pc_state_writer,
+            args=(cams, pc_state_all_csv, stop_event, REALTIME_PC_STATE_WRITE_INTERVAL_SEC),
+            daemon=True,
+        )
+        pc_state_writer_thread.start()
+        print(f"Realtime PC-state CSV started: {pc_state_all_csv}")
 
-pc_state_writer_thread = None
-if ENABLE_REALTIME_PC_STATE_CSV:
-    # create file immediately so downstream readers can open it before first update cycle
-    write_pc_state_csv(cams, pc_state_all_csv)
-    pc_state_writer_thread = threading.Thread(
-        target=realtime_pc_state_writer,
-        args=(cams, pc_state_all_csv, stop_event, REALTIME_PC_STATE_WRITE_INTERVAL_SEC),
-        daemon=True,
-    )
-    pc_state_writer_thread.start()
-    print(f"Realtime PC-state CSV started: {pc_state_all_csv}")
+    return pc_state_all_csv, pc_state_writer_thread
 
-threads = []
-for cam_idx, cam_data in cams.items():
-    t = threading.Thread(target=camera_thread_fn, args=(cam_idx, cam_data, stop_event), daemon=True)
-    t.start()
-    threads.append(t)
 
-# Wait for all threads to finish (or until any window is closed or 'q' is pressed)
-try:
-    while any(t.is_alive() for t in threads):
-        if stop_event.is_set():
-            break
-        time.sleep(0.1)
-except KeyboardInterrupt:
-    print("\nInterrupted by user (KeyboardInterrupt)")
-    stop_event.set()
-for t in threads:
-    t.join()
+def run_camera_threads(cams, stop_event):
+    threads = []
+    for cam_idx, cam_data in cams.items():
+        thread = threading.Thread(target=camera_thread_fn, args=(cam_idx, cam_data, stop_event), daemon=True)
+        thread.start()
+        threads.append(thread)
 
-# ensure writer thread exits and final state is flushed
-stop_event.set()
-if ENABLE_REALTIME_PC_STATE_CSV and pc_state_writer_thread is not None:
-    pc_state_writer_thread.join(timeout=2.0)
-    write_pc_state_csv(cams, pc_state_all_csv)
-
-# Release cameras and close windows
-for cam_data in cams.values():
-    cap = cam_data["cap"]
-    if cap:
-        cap.release()
-
-cv2.destroyAllWindows()
-
-# stop resource monitor if it was started
-if ENABLE_RESOURCE_MONITOR and monitor_stop is not None and monitor_thread is not None:
+    # Wait for all threads to finish (or until any window is closed or 'q' is pressed)
     try:
-        # stop_resource_monitor is provided by resource_monitor module
-        from tool.resource_monitor import stop_resource_monitor
+        while any(thread.is_alive() for thread in threads):
+            if stop_event.is_set():
+                break
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user (KeyboardInterrupt)")
+        stop_event.set()
 
-        stop_resource_monitor(monitor_stop, monitor_thread, timeout=2.0)
-        print("Resource monitor stopped")
-    except Exception:
+    for thread in threads:
+        thread.join()
+
+
+def stop_realtime_pc_state_writer(cams, stop_event, pc_state_writer_thread, pc_state_all_csv):
+    # ensure writer thread exits and final state is flushed
+    stop_event.set()
+    if ENABLE_REALTIME_PC_STATE_CSV and pc_state_writer_thread is not None:
+        pc_state_writer_thread.join(timeout=2.0)
+        write_pc_state_csv(cams, pc_state_all_csv)
+
+
+def release_camera_resources(cams):
+    for cam_data in cams.values():
+        cap = cam_data["cap"]
+        if cap:
+            cap.release()
+
+    cv2.destroyAllWindows()
+
+
+def stop_resource_monitor_if_enabled(monitor_stop, monitor_thread):
+    if ENABLE_RESOURCE_MONITOR and monitor_stop is not None and monitor_thread is not None:
         try:
-            monitor_stop.set()
-            monitor_thread.join(timeout=2.0)
+            # stop_resource_monitor is provided by resource_monitor module
+            from tool.resource_monitor import stop_resource_monitor
+
+            stop_resource_monitor(monitor_stop, monitor_thread, timeout=2.0)
+            print("Resource monitor stopped")
         except Exception:
-            pass
+            try:
+                monitor_stop.set()
+                monitor_thread.join(timeout=2.0)
+            except Exception:
+                pass
 
-# Save logs per camera
-all_unattended_logs = []
-perf_rows_written = False
-for cam_idx, cam_data in cams.items():
-    safe_name = cam_data.get("label") or to_safe_label(cam_data.get("name", f"cam{cam_idx}"))
-    people_file_prefix = f"people_with_conf_and_roi_{safe_name or f'cam{cam_idx}'}"
-    people_csv_paths = append_rows_to_daily_csv(
-        cam_data.get("logs", []),
-        ["time", "person_id", "confidence", "roi_file", "PCnum"],
-        cam_data.get("log_dir", LOG_BASE_DIR),
-        people_file_prefix,
+
+def save_session_outputs(cams, run_start_day_tag, pc_state_all_csv):
+    all_unattended_logs = []
+    perf_rows_written = False
+    for cam_idx, cam_data in cams.items():
+        safe_name = cam_data.get("label") or to_safe_label(cam_data.get("name", f"cam{cam_idx}"))
+        people_file_prefix = f"people_with_conf_and_roi_{safe_name or f'cam{cam_idx}'}"
+        people_csv_paths = append_rows_to_daily_csv(
+            cam_data.get("logs", []),
+            ["time", "person_id", "confidence", "roi_file", "PCnum"],
+            cam_data.get("log_dir", LOG_BASE_DIR),
+            people_file_prefix,
+            run_start_day_tag,
+        )
+        primary_people_csv = people_csv_paths[-1] if people_csv_paths else ""
+
+        # PC activity event log (USING_PC / NON_PC_ACTIVITY)
+        event_file_prefix = f"pc_activity_events_{safe_name or f'cam{cam_idx}'}"
+        pc_event_csv_paths = append_rows_to_daily_csv(
+            cam_data.get("pc_event_logs", []),
+            ["time", "cam_name", "pc_name", "event_type", "person_id", "pc_on", "dwell_sec", "PCnum"],
+            cam_data.get("log_dir", LOG_BASE_DIR),
+            event_file_prefix,
+            run_start_day_tag,
+        )
+        primary_event_csv = pc_event_csv_paths[-1] if pc_event_csv_paths else ""
+
+        # collect unattended/person-flag logs for one combined file in logs/
+        all_unattended_logs.extend(cam_data.get("pc_unattended_logs", []))
+
+        print(f"\n=== Session Summary ({cam_data['name']}) ===")
+        print(f"Total unique persons detected: {len(cam_data['tracked_persons'])}")
+        if len(people_csv_paths) == 1:
+            print(f"Logs saved to {primary_people_csv}")
+        else:
+            print(f"Logs saved to {len(people_csv_paths)} daily file(s): {people_csv_paths[0]} -> {people_csv_paths[-1]}")
+
+        if len(pc_event_csv_paths) == 1:
+            print(f"PC activity events saved to {primary_event_csv}")
+        else:
+            print(
+                f"PC activity events saved to {len(pc_event_csv_paths)} daily file(s): "
+                f"{pc_event_csv_paths[0]} -> {pc_event_csv_paths[-1]}"
+            )
+
+        # performance summary
+        frames = cam_data.get("frames_seen", 0)
+        total_latency_ms = cam_data.get("total_latency_ms", 0.0)
+        inference_runs = cam_data.get("inference_runs", 0)
+        total_inference_time_ms = cam_data.get("total_inference_time_ms", 0.0)
+        first_t = cam_data.get("first_frame_time")
+        last_t = cam_data.get("last_frame_time")
+        total_runtime_s = None
+        if first_t is not None and last_t is not None and last_t > first_t:
+            total_runtime_s = last_t - first_t
+
+        avg_latency = (total_latency_ms / frames) if frames > 0 else 0.0
+        avg_inference = (total_inference_time_ms / inference_runs) if inference_runs > 0 else 0.0
+        avg_fps = (frames / total_runtime_s) if total_runtime_s and total_runtime_s > 0 else cam_data.get("fps", 0.0)
+
+        print(f"Frames processed: {frames}")
+        if total_runtime_s:
+            print(f"Total runtime: {total_runtime_s:.2f} s")
+        print(f"Average FPS: {avg_fps:.2f}")
+        print(f"Average latency/frame: {avg_latency:.1f} ms")
+        print(f"Inference runs: {inference_runs} (avg {avg_inference:.1f} ms per inference)")
+        print("===============================")
+
+        # append a per-camera summary row to a global performance CSV (create if missing)
+        try:
+            perf_timestamp = time.strftime(
+                "%Y-%m-%d %H:%M:%S",
+                time.localtime(cam_data.get("first_frame_time") or time.time()),
+            )
+            session_config = build_session_config_string(cams)
+            perf_row = {
+                "session_timestamp": perf_timestamp,
+                "cam_idx": cam_idx,
+                "cam_name": cam_data.get("name"),
+                "frames": frames,
+                "total_runtime_s": total_runtime_s if total_runtime_s is not None else 0.0,
+                "avg_fps": float(f"{avg_fps:.2f}"),
+                "avg_latency_ms": float(f"{avg_latency:.1f}"),
+                "inference_runs": inference_runs,
+                "avg_inference_ms": float(f"{avg_inference:.1f}"),
+                "total_inference_ms": float(f"{total_inference_time_ms:.1f}"),
+                "unique_persons": len(cam_data.get("tracked_persons", {})),
+                "log_csv": primary_people_csv,
+                "roi_dir": cam_data.get("roi_dir"),
+            }
+
+            # resource usage summary (if monitor collected samples)
+            try:
+                mem_samples = [m for m in cam_data.get("mem_samples", []) if m]
+                cpu_samples = [c for c in cam_data.get("cpu_proc_samples", []) if c is not None]
+                gpu_samples = [g for g in cam_data.get("gpu_mem_samples", []) if g]
+
+                perf_row["avg_proc_rss_bytes"] = int(sum(mem_samples) / len(mem_samples)) if mem_samples else 0
+                perf_row["peak_proc_rss_bytes"] = int(max(mem_samples)) if mem_samples else 0
+                perf_row["avg_proc_cpu_percent"] = float(f"{(sum(cpu_samples)/len(cpu_samples)) if cpu_samples else 0:.2f}")
+                perf_row["avg_gpu_mem_bytes"] = int(sum(gpu_samples) / len(gpu_samples)) if gpu_samples else 0
+                perf_row["peak_gpu_mem_bytes"] = int(max(gpu_samples)) if gpu_samples else 0
+            except Exception:
+                perf_row["avg_proc_rss_bytes"] = None
+                perf_row["peak_proc_rss_bytes"] = None
+                perf_row["avg_proc_cpu_percent"] = None
+                perf_row["avg_gpu_mem_bytes"] = None
+                perf_row["peak_gpu_mem_bytes"] = None
+
+            # Add config as last column
+            perf_row["config"] = session_config
+
+            perf_df = pd.DataFrame([perf_row])
+            write_header = not os.path.exists(PERF_SUMMARY_FILE)
+            perf_df.to_csv(PERF_SUMMARY_FILE, mode="a", index=False, header=write_header)
+            perf_rows_written = True
+            print(f"Performance summary appended to {PERF_SUMMARY_FILE}")
+        except Exception as e:
+            print(f"Failed to write performance summary for {cam_data.get('name')}: {e}")
+
+    # add one empty separator line after a full run (not per camera)
+    if perf_rows_written:
+        with open(PERF_SUMMARY_FILE, "a", encoding="utf-8") as perf_file:
+            perf_file.write("\n")
+
+    # write one combined person-flag CSV for all cameras under logs/
+    all_unattended_csv_paths = append_rows_to_daily_csv(
+        all_unattended_logs,
+        ["time", "user", "pc_name", "cam_name", "reason"],
+        LOG_BASE_DIR,
+        "pc_unattended_flags",
         run_start_day_tag,
     )
-    primary_people_csv = people_csv_paths[-1] if people_csv_paths else ""
-
-    # PC activity event log (USING_PC / NON_PC_ACTIVITY)
-    event_file_prefix = f"pc_activity_events_{safe_name or f'cam{cam_idx}'}"
-    pc_event_csv_paths = append_rows_to_daily_csv(
-        cam_data.get("pc_event_logs", []),
-        ["time", "cam_name", "pc_name", "event_type", "person_id", "pc_on", "dwell_sec", "PCnum"],
-        cam_data.get("log_dir", LOG_BASE_DIR),
-        event_file_prefix,
-        run_start_day_tag,
-    )
-    primary_event_csv = pc_event_csv_paths[-1] if pc_event_csv_paths else ""
-
-    # collect unattended/person-flag logs for one combined file in logs/
-    all_unattended_logs.extend(cam_data.get("pc_unattended_logs", []))
-
-    print(f"\n=== Session Summary ({cam_data['name']}) ===")
-    print(f"Total unique persons detected: {len(cam_data['tracked_persons'])}")
-    if len(people_csv_paths) == 1:
-        print(f"Logs saved to {primary_people_csv}")
-    else:
-        print(f"Logs saved to {len(people_csv_paths)} daily file(s): {people_csv_paths[0]} -> {people_csv_paths[-1]}")
-
-    if len(pc_event_csv_paths) == 1:
-        print(f"PC activity events saved to {primary_event_csv}")
+    if len(all_unattended_csv_paths) == 1:
+        print(f"Combined unattended/person-flag CSV saved to {all_unattended_csv_paths[0]}")
     else:
         print(
-            f"PC activity events saved to {len(pc_event_csv_paths)} daily file(s): "
-            f"{pc_event_csv_paths[0]} -> {pc_event_csv_paths[-1]}"
+            "Combined unattended/person-flag CSV saved to "
+            f"{len(all_unattended_csv_paths)} daily file(s): "
+            f"{all_unattended_csv_paths[0]} -> {all_unattended_csv_paths[-1]}"
         )
-    # performance summary
-    frames = cam_data.get("frames_seen", 0)
-    total_latency_ms = cam_data.get("total_latency_ms", 0.0)
-    inference_runs = cam_data.get("inference_runs", 0)
-    total_inference_time_ms = cam_data.get("total_inference_time_ms", 0.0)
-    first_t = cam_data.get("first_frame_time")
-    last_t = cam_data.get("last_frame_time")
-    total_runtime_s = None
-    if first_t is not None and last_t is not None and last_t > first_t:
-        total_runtime_s = last_t - first_t
 
-    avg_latency = (total_latency_ms / frames) if frames > 0 else 0.0
-    avg_inference = (total_inference_time_ms / inference_runs) if inference_runs > 0 else 0.0
-    avg_fps = (frames / total_runtime_s) if total_runtime_s and total_runtime_s > 0 else cam_data.get("fps", 0.0)
+    # create daily summary report
+    create_daily_summary_report(cams, run_start_day_tag, LOG_BASE_DIR)
 
-    print(f"Frames processed: {frames}")
-    if total_runtime_s:
-        print(f"Total runtime: {total_runtime_s:.2f} s")
-    print(f"Average FPS: {avg_fps:.2f}")
-    print(f"Average latency/frame: {avg_latency:.1f} ms")
-    print(f"Inference runs: {inference_runs} (avg {avg_inference:.1f} ms per inference)")
-    print("===============================")
-    # append a per-camera summary row to a global performance CSV (create if missing)
+    # Clean up empty log folders
+    cleanup_empty_log_folders(LOG_BASE_DIR)
+
+    if ENABLE_REALTIME_PC_STATE_CSV:
+        print(f"Realtime all-PC state CSV saved to {pc_state_all_csv}")
+
+
+def main():
+    cams = build_camera_states()
+    monitor_stop, monitor_thread = start_resource_monitor_if_enabled(cams)
+    print_session_banner()
+
+    stop_event = threading.Event()
+    run_start_day_tag = current_day_tag()
+    pc_state_all_csv, pc_state_writer_thread = start_realtime_pc_state_writer(cams, stop_event)
+
     try:
-        perf_timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(cam_data.get("first_frame_time") or time.time()))
-        session_config = build_session_config_string(cams)
-        perf_row = {
-            "session_timestamp": perf_timestamp,
-            "cam_idx": cam_idx,
-            "cam_name": cam_data.get("name"),
-            "frames": frames,
-            "total_runtime_s": total_runtime_s if total_runtime_s is not None else 0.0,
-            "avg_fps": float(f"{avg_fps:.2f}"),
-            "avg_latency_ms": float(f"{avg_latency:.1f}"),
-            "inference_runs": inference_runs,
-            "avg_inference_ms": float(f"{avg_inference:.1f}"),
-            "total_inference_ms": float(f"{total_inference_time_ms:.1f}"),
-            "unique_persons": len(cam_data.get("tracked_persons", {})),
-            "log_csv": primary_people_csv,
-            "roi_dir": cam_data.get("roi_dir"),
-        }
+        run_camera_threads(cams, stop_event)
+    finally:
+        stop_realtime_pc_state_writer(cams, stop_event, pc_state_writer_thread, pc_state_all_csv)
+        release_camera_resources(cams)
+        stop_resource_monitor_if_enabled(monitor_stop, monitor_thread)
+        save_session_outputs(cams, run_start_day_tag, pc_state_all_csv)
 
-        # resource usage summary (if monitor collected samples)
-        try:
-            mem_samples = [m for m in cam_data.get("mem_samples", []) if m]
-            cpu_samples = [c for c in cam_data.get("cpu_proc_samples", []) if c is not None]
-            gpu_samples = [g for g in cam_data.get("gpu_mem_samples", []) if g]
 
-            perf_row["avg_proc_rss_bytes"] = int(sum(mem_samples) / len(mem_samples)) if mem_samples else 0
-            perf_row["peak_proc_rss_bytes"] = int(max(mem_samples)) if mem_samples else 0
-            perf_row["avg_proc_cpu_percent"] = float(f"{(sum(cpu_samples)/len(cpu_samples)) if cpu_samples else 0:.2f}")
-            perf_row["avg_gpu_mem_bytes"] = int(sum(gpu_samples) / len(gpu_samples)) if gpu_samples else 0
-            perf_row["peak_gpu_mem_bytes"] = int(max(gpu_samples)) if gpu_samples else 0
-        except Exception:
-            perf_row["avg_proc_rss_bytes"] = None
-            perf_row["peak_proc_rss_bytes"] = None
-            perf_row["avg_proc_cpu_percent"] = None
-            perf_row["avg_gpu_mem_bytes"] = None
-            perf_row["peak_gpu_mem_bytes"] = None
-
-        # Add config as last column
-        perf_row["config"] = session_config
-
-        perf_df = pd.DataFrame([perf_row])
-        write_header = not os.path.exists(PERF_SUMMARY_FILE)
-        perf_df.to_csv(PERF_SUMMARY_FILE, mode="a", index=False, header=write_header)
-        perf_rows_written = True
-        print(f"Performance summary appended to {PERF_SUMMARY_FILE}")
-    except Exception as e:
-        print(f"Failed to write performance summary for {cam_data.get('name')}: {e}")
-
-# add one empty separator line after a full run (not per camera)
-if perf_rows_written:
-    with open(PERF_SUMMARY_FILE, "a", encoding="utf-8") as perf_file:
-        perf_file.write("\n")
-
-# write one combined person-flag CSV for all cameras under logs/
-all_unattended_csv_paths = append_rows_to_daily_csv(
-    all_unattended_logs,
-    ["time", "user", "pc_name", "cam_name", "reason"],
-    LOG_BASE_DIR,
-    "pc_unattended_flags",
-    run_start_day_tag,
-)
-if len(all_unattended_csv_paths) == 1:
-    print(f"Combined unattended/person-flag CSV saved to {all_unattended_csv_paths[0]}")
-else:
-    print(
-        "Combined unattended/person-flag CSV saved to "
-        f"{len(all_unattended_csv_paths)} daily file(s): "
-        f"{all_unattended_csv_paths[0]} -> {all_unattended_csv_paths[-1]}"
-    )
-
-# create daily summary report
-create_daily_summary_report(cams, run_start_day_tag, LOG_BASE_DIR)
-
-if ENABLE_REALTIME_PC_STATE_CSV:
-    print(f"Realtime all-PC state CSV saved to {pc_state_all_csv}")
+if __name__ == "__main__":
+    main()
