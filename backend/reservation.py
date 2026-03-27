@@ -1,9 +1,6 @@
-# C:\Users\user\Downloads\นิพนธ์\complab-reservation\backend\reservation.py
 import os
 import shutil
-import json
-import asyncio
-from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form, WebSocket, WebSocketDisconnect 
+from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form 
 from pydantic import BaseModel
 from datetime import datetime, date, time, timezone, timedelta
 
@@ -196,71 +193,3 @@ def get_all_reservations():
     finally:
         if cur: cur.close()
         if conn: conn.close()
-
-# =================================================================
-# ระบบ WebSocket สำหรับล็อกที่นั่งชั่วคราว (สีเหลือง) พร้อมระบบตัดเวลา 4 นาที
-# =================================================================
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-        self.locked_seats = {} 
-        self.sweeper_task = None 
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        await websocket.send_json({"type": "INIT", "data": list(self.locked_seats.keys())})
-
-        if self.sweeper_task is None:
-            self.sweeper_task = asyncio.create_task(self.clear_expired_locks())
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except:
-                pass
-
-    async def clear_expired_locks(self):
-        while True:
-            await asyncio.sleep(10) 
-            now = datetime.now()
-            expired_keys = []
-            
-            for seat_key, lock_time in list(self.locked_seats.items()):
-                if now - lock_time > timedelta(minutes=4):
-                    expired_keys.append(seat_key)
-                    
-            for key in expired_keys:
-                if key in self.locked_seats:
-                    del self.locked_seats[key]
-                await self.broadcast({"type": "UNLOCK", "seat_key": key})
-
-
-manager = ConnectionManager()
-
-@router.websocket("/ws/seats")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_text()
-            payload = json.loads(data)
-            action = payload.get("action")
-            seat_key = payload.get("seat_key")
-
-            if action == "lock":
-                manager.locked_seats[seat_key] = datetime.now()
-                await manager.broadcast({"type": "LOCK", "seat_key": seat_key})
-            
-            elif action == "unlock":
-                if seat_key in manager.locked_seats:
-                    del manager.locked_seats[seat_key]
-                await manager.broadcast({"type": "UNLOCK", "seat_key": seat_key})
-
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)

@@ -1,14 +1,20 @@
-// src/components/SeatMap.jsx
-import { RiComputerFill, RiUserFill } from "react-icons/ri"; 
+import { RiComputerFill, RiUserFill, RiCheckboxCircleFill } from "react-icons/ri"; // 👈 เพิ่ม RiCheckboxCircleFill เข้ามา
 import '../styles/App.css'; 
 
-const Seat = ({ seatNumber, isSelected, isBooked, isLocked, onClick }) => {
-  let iconColor = "#555"; 
-  if (isBooked) iconColor = "#ef4444";     
-  else if (isSelected) iconColor = "#4CAF50"; 
-  else if (isLocked) iconColor = "#facc15"; 
+const Seat = ({ seatNumber, isSelected, isBooked, onClick }) => {
+  const isDisabled = isBooked;
 
-  const isDisabled = isBooked || isLocked;
+  // 🟢 จัดการสัญลักษณ์และสีตามสถานะ
+  let IconComponent = RiComputerFill; // ค่าเริ่มต้น (ว่าง)
+  let iconColor = "#555"; 
+
+  if (isBooked) {
+    IconComponent = RiUserFill;       // จองแล้ว (รูปคน)
+    iconColor = "#ef4444";
+  } else if (isSelected) {
+    IconComponent = RiCheckboxCircleFill; // กำลังเลือก (รูปติ๊กถูก)
+    iconColor = "#4CAF50";
+  }
 
   return (
     <div 
@@ -17,23 +23,19 @@ const Seat = ({ seatNumber, isSelected, isBooked, isLocked, onClick }) => {
       style={{ 
         cursor: isDisabled ? 'not-allowed' : 'pointer', 
         opacity: isBooked ? 0.6 : 1,
-        transition: 'transform 0.2s',
-        animation: isLocked ? 'pulse 2s infinite' : 'none' 
+        transition: 'transform 0.2s'
       }}
       onMouseEnter={(e) => !isDisabled && (e.currentTarget.style.transform = 'scale(1.1)')}
       onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
     >
-      {(isBooked || isSelected || isLocked) ? (
-        <RiUserFill className="seat-icon" color={iconColor} /> 
-      ) : (
-        <RiComputerFill className="seat-icon" color={iconColor} /> 
-      )}
+      {/* เรียกใช้ Icon ที่ถูกเลือก */}
+      <IconComponent className="seat-icon" color={iconColor} /> 
       <div className="seat-number">{seatNumber}</div>
     </div>
   );
 };
 
-const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [], lockedSeats = [], selectedDate, startTime }) => {
+const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [] }) => {
   const seats = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, number: i + 1 }));
   
   const leftSideSeats = seats.filter(seat => (seat.id - 1) % 6 < 3);
@@ -42,17 +44,11 @@ const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [], lockedSeats =
   const renderSeat = (seat) => {
     const isBooked = bookedSeats.some(booked => String(booked) === String(seat.number));
     
-    const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-    const seatKey = `${dateStr}_${startTime}_Seat${seat.number}`;
-    
-    const isLocked = lockedSeats.includes(seatKey) && String(selectedSeatId) !== String(seat.number);
-    
     return (
       <Seat 
         key={seat.id} 
         seatNumber={seat.number} 
         isBooked={isBooked} 
-        isLocked={isLocked} 
         isSelected={String(selectedSeatId) === String(seat.number)} 
         onClick={() => onSelectSeat(seat.number)}
       />
@@ -78,7 +74,7 @@ const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [], lockedSeats =
         </div>
       </div>
 
-      {/* ✨ โซนคำอธิบายสัญลักษณ์ (Legend) เพิ่มใหม่ตรงนี้ครับ ✨ */}
+      {/* โซนคำอธิบายสัญลักษณ์ (อัปเดตไอคอนใหม่ให้ตรงกัน) */}
       <div style={{ 
           display: 'flex', 
           justifyContent: 'center', 
@@ -95,12 +91,8 @@ const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [], lockedSeats =
               <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>ว่าง</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <RiUserFill color="#4CAF50" size={20} /> 
+              <RiCheckboxCircleFill color="#4CAF50" size={20} /> {/* 👈 เปลี่ยนไอคอนตรงนี้ */}
               <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>กำลังเลือก</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <RiUserFill color="#facc15" size={20} /> 
-              <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>กำลังมีคนทำรายการ</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <RiUserFill color="#ef4444" size={20} /> 

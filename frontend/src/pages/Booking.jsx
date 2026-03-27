@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, forwardRef, useRef } from 'react';
+import { useState, useMemo, useEffect, forwardRef } from 'react';
 import { useNavigate } from 'react-router-dom'; 
 import { RiCalendarEventFill, RiSettings3Fill } from 'react-icons/ri'; 
 import DatePicker from 'react-datepicker';
@@ -51,17 +51,6 @@ function Booking() {
   const [capturedImageBase64, setCapturedImageBase64] = useState(null);
 
   const [bookedSeatsFromDB, setBookedSeatsFromDB] = useState([]);
-  
-  const [lockedSeats, setLockedSeats] = useState([]);
-  const ws = useRef(null);
-
-  const unlockCurrentSeat = () => {
-      if (selectedSeat && ws.current && ws.current.readyState === WebSocket.OPEN) {
-          const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-          const oldSeatKey = `${dateStr}_${startTime}_Seat${selectedSeat}`;
-          ws.current.send(JSON.stringify({ action: "unlock", seat_key: oldSeatKey }));
-      }
-  };
 
   const formatThaiDate = (dateObj) => {
     if (!dateObj) return "";
@@ -79,28 +68,6 @@ function Booking() {
     else if (min === 30) { min = 29; }
     return `${hour.toString().padStart(2, '0')}:${min}`;
   };
-
-  useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/seats`;
-    
-    ws.current = new WebSocket(wsUrl);
-
-    ws.current.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.type === 'INIT') {
-        setLockedSeats(message.data);
-      } else if (message.type === 'LOCK') {
-        setLockedSeats(prev => [...prev, message.seat_key]);
-      } else if (message.type === 'UNLOCK') {
-        setLockedSeats(prev => prev.filter(key => key !== message.seat_key));
-      }
-    };
-
-    return () => {
-      if (ws.current) ws.current.close();
-    };
-  }, []);
 
   useEffect(() => {
     if (startTime && endTime && selectedDate) {
@@ -125,7 +92,6 @@ function Booking() {
   }, [bookedSeatsFromDB]);
 
   const handleStartTimeChange = (newStart) => {
-    unlockCurrentSeat(); 
     setStartTime(newStart);
     const startIndex = allTimeSlots.indexOf(newStart);
     const nextSlot = allTimeSlots[startIndex + 1];
@@ -145,7 +111,6 @@ function Booking() {
   };
 
   const handleCancelSummary = () => {
-    unlockCurrentSeat(); 
     setShowSummary(false);
     setSelectedSeat(null); 
   };
@@ -174,7 +139,6 @@ function Booking() {
         });
 
         if (response.ok) {
-            unlockCurrentSeat(); 
             setShowSummary(false); 
             
             Swal.fire({
@@ -237,7 +201,7 @@ function Booking() {
   return (
     <div className="main-layout">
       
-      {/* ✨ โค้ดปุ่มลอยไปหน้า Admin ✨ */}
+      {/* โค้ดปุ่มลอยไปหน้า Admin */}
       <div 
         onClick={() => navigate('/admin')}
         style={{
@@ -262,7 +226,6 @@ function Booking() {
       >
         <RiSettings3Fill size={24} />
       </div>
-      {/*  */}
 
       {showScanner && (
         <FaceScanner 
@@ -310,24 +273,13 @@ function Booking() {
           <SeatMap 
             selectedSeatId={selectedSeat} 
             bookedSeats={occupiedSeats} 
-            lockedSeats={lockedSeats} 
             selectedDate={selectedDate} 
             startTime={startTime} 
             onSelectSeat={(id) => {
-              const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-              const seatKey = `${dateStr}_${startTime}_Seat${id}`;
-
               if (selectedSeat === id) {
                 setSelectedSeat(null);
-                if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-                    ws.current.send(JSON.stringify({ action: "unlock", seat_key: seatKey }));
-                }
               } else {
-                unlockCurrentSeat();
                 setSelectedSeat(id);
-                if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-                    ws.current.send(JSON.stringify({ action: "lock", seat_key: seatKey }));
-                }
               }
             }} 
           />
@@ -340,7 +292,6 @@ function Booking() {
             <DatePicker
               selected={selectedDate}
               onChange={(date) => { 
-                  unlockCurrentSeat(); 
                   setSelectedDate(date); 
                   setSelectedSeat(null); 
               }}
