@@ -18,11 +18,11 @@ const getInitialTimeSlots = () => {
   let h = now.getHours();
   let m = now.getMinutes();
 
-  if (m > 0 && m <= 30) {
-    m = 30;
-  } else if (m > 30) {
+  // ปัดเศษลงเพื่อหารอบเวลาปัจจุบัน
+  if (m < 30) {
     m = 0;
-    h += 1;
+  } else {
+    m = 30;
   }
 
   const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
@@ -32,7 +32,7 @@ const getInitialTimeSlots = () => {
     return { start: allTimeSlots[idx], end: allTimeSlots[idx + 1] };
   }
   
-  return { start: "08:30", end: "09:30" };
+  return { start: "08:30", end: "09:00" };
 };
 
 function Booking() {
@@ -317,7 +317,7 @@ function Booking() {
         ) : (
           !selectedSeat && (
              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: '#aaa', textAlign: 'center', border: '2px dashed #eee', borderRadius: '12px', marginTop: '20px', padding: '20px' }}>
-               <div style={{ fontSize: '40px', marginBottom: '10px' }}>👈</div>
+               <div style={{ fontSize: '40px', marginBottom: '10px' }}></div>
                <div>เลือกเวลาที่ต้องการ<br/>และคลิกที่นั่งฝั่ง{window.innerWidth > 768 ? 'ซ้าย' : 'บน'}</div>
              </div>
           )

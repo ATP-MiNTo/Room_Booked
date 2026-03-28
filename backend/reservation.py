@@ -53,7 +53,7 @@ def get_booked_seats(
         rows = cur.fetchall()
         return [str(row[0]) for row in rows]
     except Exception as e:
-        print(f"🔥 DATABASE ERROR (GET /booked-seats): {e}")
+        print(f"DATABASE ERROR (GET /booked-seats): {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if cur: cur.close()
@@ -80,8 +80,14 @@ def reserve_with_image(
     start_dt = datetime.combine(reserve_date, start_time).replace(tzinfo=thai_tz)
     end_dt = datetime.combine(reserve_date, end_time).replace(tzinfo=thai_tz)
 
-    if start_dt <= now:
-        raise HTTPException(status_code=400, detail="ไม่สามารถจองย้อนหลังได้")
+    # ปรับเงื่อนไขให้ยืดหยุ่นขึ้น
+    # 1. ป้องกันเฉพาะกรณีที่เวลาสิ้นสุดของรอบนั้นผ่านไปแล้ว
+    if end_dt <= now:
+        raise HTTPException(status_code=400, detail="ไม่สามารถจองรอบที่เวลาสิ้นสุดไปแล้วได้")
+
+    # 2. อนุญาตให้จองล่าช้าได้ แต่เวลาย้อนหลังต้องไม่เกิน 30 นาที (1800 วินาที)
+    if start_dt < now and (now - start_dt).total_seconds() > 1800:
+        raise HTTPException(status_code=400, detail="ไม่สามารถจองย้อนหลังเกิน 30 นาทีได้")
 
     today_folder = now.strftime("%Y-%m-%d")
     daily_upload_dir = os.path.join(BASE_UPLOAD_DIR, today_folder)
@@ -151,7 +157,7 @@ def reserve_with_image(
         raise
     except Exception as e:
         if conn: conn.rollback()
-        print(f"🔥 DATABASE ERROR (POST /reserve-with-image): {e}")
+        print(f"DATABASE ERROR (POST /reserve-with-image): {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if cur: cur.close()
@@ -188,7 +194,7 @@ def get_all_reservations():
             for r in rows
         ]
     except Exception as e:
-        print(f"🔥 DATABASE ERROR (GET /reservations): {e}")
+        print(f"DATABASE ERROR (GET /reservations): {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if cur: cur.close()
