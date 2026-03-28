@@ -1,44 +1,112 @@
-// src/pages/admin/Monitor.jsx
 import { useState, useEffect } from 'react';
-import { RiComputerFill, RiUserFill, RiCloseLine } from 'react-icons/ri';
-import { PiExclamationMarkFill } from 'react-icons/pi'; 
+import { 
+  RiComputerFill, RiUserFill, RiCloseLine, 
+  RiTimerFill, RiUserForbidFill, RiToolsFill 
+} from 'react-icons/ri';
 import AdminLayout from './AdminLayout';
 
 export default function Monitor() {
   const [selectedSeat, setSelectedSeat] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
+  const [dbBookings, setDbBookings] = useState([]);
+  const [cameraData, setCameraData] = useState([]);
+
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth <= 768);
-    };
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // --------------------------------------------------------
-  // ✨ อัปเกรดขนาดให้ใหญ่สะใจ สำหรับหน้าจอคอมพิวเตอร์ ✨
-  // --------------------------------------------------------
+  // 📡 ดึงข้อมูลการจองของจริงจาก Database (ดึงทุก 1 นาที)
+  useEffect(() => {
+    const fetchBookings = async () => {
+      try {
+        const response = await fetch('/reservations'); 
+        if (response.ok) {
+          const data = await response.json();
+          setDbBookings(data);
+        }
+      } catch (error) {
+        console.error("Error fetching bookings:", error);
+      }
+    };
+    
+    fetchBookings();
+    const interval = setInterval(fetchBookings, 60000); 
+    return () => clearInterval(interval);
+  }, []);
+
+  // 🎥 ดึงข้อมูลกล้องผ่าน WebSocket ของจริง
+  useEffect(() => {
+    // ⚠️ ถ้าเพื่อนรันกล้องอยู่อีกเครื่อง ต้องเปลี่ยน localhost เป็น IP ของเพื่อนนะครับ
+    const wsUrl = 'ws://localhost:8000/ws/pc-updates'; 
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setCameraData(data);
+      } catch (error) {
+        console.error("Error parsing camera data:", error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error("WebSocket Camera Error:", error);
+    };
+
+    return () => ws.close();
+  }, []);
+
+  // 🧠 ฟังก์ชันคำนวณสถานะ (เอา DB ชนกับ กล้อง)
+  const getSeatData = (seatNumber) => {
+    const camInfo = cameraData.find(pc => pc.pc_name === `PC${seatNumber}`) || { available: 0, pc_on: false };
+    const isSitting = camInfo.available > 0; 
+    const isPcOn = camInfo.pc_on; 
+
+    const now = new Date();
+    const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`;
+    
+    const activeBooking = dbBookings.find(b => 
+      String(b.seat_id) === String(seatNumber) && 
+      b.start_time <= currentTimeStr && 
+      b.end_time >= currentTimeStr
+    );
+
+    let finalStatus = 'unbooked_empty';
+
+    if (activeBooking && isSitting) {
+        finalStatus = 'booked_occupied'; 
+    } else if (activeBooking && !isSitting) {
+        finalStatus = 'booked_empty';    
+    } else if (!activeBooking && isSitting) {
+        finalStatus = 'unbooked_occupied'; 
+    }
+
+    return {
+        number: seatNumber,
+        status: finalStatus,
+        available: camInfo.available,
+        pc_on: isPcOn,
+        studentName: activeBooking ? `นักศึกษา (${activeBooking.student_id})` : null, 
+        studentId: activeBooking?.student_id || null,
+        time: activeBooking ? `${activeBooking.start_time} - ${activeBooking.end_time}` : null,
+        image: activeBooking ? `/data/face_scanner/${activeBooking.image_filename}` : null
+    };
+  };
+
   const size = {
-    seat: isMobile ? '45px' : '85px',          // 👈 โต๊ะใหญ่ขึ้นเป็น 85px
-    gapWrapper: isMobile ? '20px' : '70px',    // 👈 ระยะห่างซ้าย-ขวา กว้างขึ้น
-    gapGrid: isMobile ? '10px' : '20px',       // 👈 ระยะห่างระหว่างโต๊ะ กว้างขึ้น
-    icon: isMobile ? 22 : 42,                  // 👈 ไอคอนใหญ่ขึ้น
-    fontSize: isMobile ? '11px' : '16px',      // 👈 ตัวหนังสือใหญ่ขึ้น
+    seat: isMobile ? '45px' : '85px',          
+    gapWrapper: isMobile ? '20px' : '70px',    
+    gapGrid: isMobile ? '10px' : '20px',       
+    icon: isMobile ? 22 : 42,                  
+    fontSize: isMobile ? '11px' : '16px',      
     containerPadding: isMobile ? '15px' : '40px', 
   };
 
-  const mockLabStatus = {
-    1: { status: 'booked_occupied', studentName: 'สมชาย ใจดี', studentId: '1650901111', major: 'วิศวกรรมคอมพิวเตอร์และหุ่นยนต์', time: '09:00 - 10:30', image: 'https://via.placeholder.com/150' },
-    2: { status: 'booked_empty', studentName: 'สมหญิง รักเรียน', studentId: '1650902222', major: 'วิศวกรรมไฟฟ้า', time: '09:00 - 11:00', image: 'https://via.placeholder.com/150' },
-    3: { status: 'unbooked_occupied' }, 
-    4: { status: 'unbooked_empty' },    
-    5: { status: 'broken', note: 'จอภาพเปิดไม่ติด แจ้งซ่อมเมื่อวาน' }, 
-    ...Array.from({ length: 25 }).reduce((acc, _, i) => ({ ...acc, [i + 6]: { status: 'unbooked_empty' } }), {})
-  };
-
   const Seat = ({ seatNumber }) => {
-    const seatData = mockLabStatus[seatNumber] || { status: 'unbooked_empty' };
+    const seatData = getSeatData(seatNumber); 
     const isSelected = selectedSeat?.number === seatNumber;
     
     let iconColor = "#555"; 
@@ -46,16 +114,16 @@ export default function Monitor() {
 
     if (seatData.status === 'booked_occupied') {
         iconColor = "#4CAF50"; 
-        IconComponent = RiUserFill;
+        IconComponent = RiUserFill; 
     } else if (seatData.status === 'booked_empty') {
         iconColor = "#facc15"; 
-        IconComponent = RiUserFill;
+        IconComponent = RiTimerFill; 
     } else if (seatData.status === 'unbooked_occupied') {
         iconColor = "#ef4444"; 
-        IconComponent = RiUserFill;
+        IconComponent = RiUserForbidFill; 
     } else if (seatData.status === 'broken') {
         iconColor = "#9e9e9e"; 
-        IconComponent = PiExclamationMarkFill;
+        IconComponent = RiToolsFill; 
     }
 
     return (
@@ -68,14 +136,21 @@ export default function Monitor() {
             borderRadius: '12px', display: 'flex', flexDirection: 'column', 
             justifyContent: 'center', alignItems: 'center', cursor: 'pointer',
             transition: 'transform 0.2s', boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-            position: 'relative',
-            animation: seatData.status === 'unbooked_occupied' ? 'pulseRed 2s infinite' : 'none'
+            position: 'relative'
         }}
         onMouseEnter={(e) => !isMobile && (e.currentTarget.style.transform = 'scale(1.1)')}
         onMouseLeave={(e) => !isMobile && (e.currentTarget.style.transform = 'scale(1)')}
       >
         <IconComponent size={size.icon} color={iconColor} />
         <div style={{ fontSize: size.fontSize, marginTop: '4px', fontWeight: 'bold', color: '#555' }}>{seatNumber}</div>
+
+        <div style={{
+          position: 'absolute', top: '8px', right: '8px',
+          width: '12px', height: '12px', borderRadius: '50%',
+          backgroundColor: seatData.pc_on ? '#4CAF50' : '#ccc',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+          border: '2px solid white'
+        }} title={seatData.pc_on ? 'หน้าจอเปิดอยู่' : 'หน้าจอปิด'} />
       </div>
     );
   };
@@ -98,15 +173,11 @@ export default function Monitor() {
     <AdminLayout>
       <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden' }}>
         
-        {/* ================= ซ้าย: แผนผังห้องแล็บ ================= */}
         <div style={{ flex: 1, padding: isMobile ? '10px' : '30px', overflowY: 'auto', width: '100%' }}>
-            
-            {/* ✨ จัด Header ให้อยู่ตรงกลางด้วย ✨ */}
             <h2 style={{ marginTop: 0, color: '#2c3e50', borderBottom: '2px solid #eee', paddingBottom: '15px', fontSize: isMobile ? '1.1rem' : '1.5rem', maxWidth: '950px', margin: '0 auto 25px' }}>
                 Live Monitor (สถานะห้องแล็บ B4-302)
             </h2>
 
-            {/* ✨ ผังที่นั่ง (margin: '0 auto' บังคับให้อยู่ตรงกลางเป๊ะ) ✨ */}
             <div style={{ backgroundColor: 'white', padding: size.containerPadding, borderRadius: '15px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', maxWidth: isMobile ? '100%' : '950px', margin: '0 auto', overflowX: 'auto' }}>
                 <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f0f2f5', borderRadius: '8px', marginBottom: isMobile ? '20px' : '35px', minWidth: isMobile ? '360px' : 'auto', fontWeight: 'bold', color: '#666', fontSize: isMobile ? '0.9rem' : '1.1rem' }}>
                     กระดานหน้าชั้นเรียน / จอโปรเจคเตอร์
@@ -122,17 +193,18 @@ export default function Monitor() {
                 </div>
             </div>
 
-            {/* ✨ คำอธิบายสัญลักษณ์ (ให้อยู่ตรงกลางด้วย) ✨ */}
             <div style={{ display: 'flex', justifyContent: 'center', gap: isMobile ? '10px' : '25px', marginTop: '25px', flexWrap: 'wrap', backgroundColor: 'white', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', maxWidth: isMobile ? '100%' : '950px', margin: '25px auto 50px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiUserFill color="#4CAF50" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>จอง&นั่ง</span></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiUserFill color="#facc15" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>จอง&ไม่นั่ง</span></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiUserFill color="#ef4444" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>ไม่จอง&นั่ง</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiTimerFill color="#facc15" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>จอง&ไม่นั่ง</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiUserForbidFill color="#ef4444" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>ไม่จอง&นั่ง</span></div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiComputerFill color="#555" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>ว่าง</span></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><PiExclamationMarkFill color="#9e9e9e" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>เสีย</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#4CAF50', borderRadius: '50%', border: '2px solid #ddd' }}></span>
+                    <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>หน้าจอเปิด</span>
+                </div>
             </div>
         </div>
 
-        {/* ================= ขวา: ลิ้นชักรายละเอียด (Side Panel) ================= */}
         {selectedSeat && (
             <div 
                 onClick={() => setSelectedSeat(null)}
@@ -140,7 +212,6 @@ export default function Monitor() {
             />
         )}
 
-        {/* เปลี่ยนให้ลิ้นชักลอยทับเสมอ (fixed) ทั้งคอมและมือถือ จะได้ไม่ไปดันแผนผังให้เบี้ยว */}
         <div style={{ 
             position: 'fixed', top: 0, right: selectedSeat ? 0 : '-420px', 
             width: '100%', maxWidth: '400px', height: '100%', backgroundColor: 'white',
@@ -166,14 +237,16 @@ export default function Monitor() {
                         <div style={{ marginBottom: '25px' }}>
                             <h4 style={{ color: '#aaa', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #eee', paddingBottom: '8px', marginBottom: '15px' }}>ข้อมูลผู้จอง</h4>
                             <div style={{ lineHeight: '2', fontSize: '1rem', color: '#444' }}>
-                                <div><strong style={{color:'#222'}}>ชื่อ-สกุล:</strong> {selectedSeat.studentName}</div>
                                 <div><strong style={{color:'#222'}}>รหัสนักศึกษา:</strong> {selectedSeat.studentId}</div>
-                                <div><strong style={{color:'#222'}}>สาขา:</strong> {selectedSeat.major}</div>
                                 <div><strong style={{color:'#222'}}>เวลาจอง:</strong> {selectedSeat.time} น.</div>
                             </div>
                             <div style={{ marginTop: '20px' }}>
                                 <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '10px', fontWeight: 'bold' }}>ภาพสแกนใบหน้าตอนจอง:</div>
-                                <img src={selectedSeat.image} alt="Face Scan" style={{ width: '100%', height: '220px', objectFit: 'cover', borderRadius: '10px', border: '1px solid #ddd', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }} />
+                                {selectedSeat.image ? (
+                                    <img src={selectedSeat.image} alt="Face Scan" style={{ width: '100%', height: '220px', objectFit: 'cover', borderRadius: '10px', border: '1px solid #ddd', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }} />
+                                ) : (
+                                    <div style={{ width: '100%', height: '220px', backgroundColor: '#eee', display:'flex', alignItems:'center', justifyContent:'center', borderRadius: '10px', color: '#999' }}>ไม่มีรูปภาพ</div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -185,37 +258,17 @@ export default function Monitor() {
                         </div>
                     )}
 
-                    {selectedSeat.status === 'broken' && (
-                        <div style={{ backgroundColor: '#f5f5f5', padding: '20px', borderRadius: '10px', border: '2px dashed #d9d9d9', color: '#595959', fontSize: '1rem', marginBottom: '25px', lineHeight: '1.6' }}>
-                            <strong style={{fontSize: '1.1rem'}}>🛠️ หมายเหตุการแจ้งซ่อม:</strong><br/>
-                            {selectedSeat.note}
-                        </div>
-                    )}
-
                     <div style={{ marginTop: '10px' }}>
-                        <h4 style={{ color: '#aaa', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #eee', paddingBottom: '8px', marginBottom: '15px' }}>ภาพจากกล้องวงจรปิด (Live)</h4>
-                        <div style={{ width: '100%', height: '180px', backgroundColor: '#e2e8f0', borderRadius: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#94a3b8', fontSize: '1rem', border: '3px dashed #cbd5e1' }}>
-                            [ รอเชื่อมต่อ API กล้อง ]
+                        <h4 style={{ color: '#aaa', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #eee', paddingBottom: '8px', marginBottom: '15px' }}>สถานะหน้าจอ</h4>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.1rem', color: '#333' }}>
+                            <div style={{ width: '15px', height: '15px', borderRadius: '50%', backgroundColor: selectedSeat.pc_on ? '#4CAF50' : '#ccc' }}></div>
+                            {selectedSeat.pc_on ? 'เปิดใช้งานอยู่' : 'ปิดการใช้งาน'}
                         </div>
                     </div>
 
                 </div>
             )}
         </div>
-
-        <style>
-            {`
-            @keyframes pulseRed {
-                0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-                70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
-                100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-            }
-            ::-webkit-scrollbar { width: 8px; height: 8px; }
-            ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
-            ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
-            ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
-            `}
-        </style>
       </div>
     </AdminLayout>
   );

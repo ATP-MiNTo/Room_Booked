@@ -22,7 +22,7 @@ export default function Login() {
     if (username === 'admin' && password === '1234') {
         console.log('Login Success (Mock)!');
         // เอา Token สมมติไปเก็บในเครื่อง (เพื่อให้ App.jsx รู้ว่า Login แล้ว)
-        localStorage.setItem('adminToken', 'mock_token_12345'); 
+        sessionStorage.setItem('adminToken', 'mock_token_12345');
         // เด้งไปหน้า Monitor อัตโนมัติ
         navigate('/admin/monitor');
     } else {
