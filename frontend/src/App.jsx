@@ -6,11 +6,8 @@ import BookingHistory from './pages/admin/BookingHistory';
 import Login from './pages/admin/Login';
 import ProtectedRoute from './components/ProtectedRoute';
 
-// สวิตช์สลับโหมด (ให้เปิดใช้งานแค่อันใดอันหนึ่ง) 
-/* โหมดทดสอบอยู่ (มีแผงสีชมพู) */
-// import Monitor from './pages/admin/MonitorMock';
-/* โหมดจริง */
 import Monitor from './pages/admin/Monitor';
+import MonitorMock from './pages/admin/MonitorMock'; // นำเข้าหน้า Monitor โหมดจำลอง
 
 function App() {
   return (
@@ -31,6 +28,12 @@ function App() {
         <Route 
             path="/admin/monitor" 
             element={ <ProtectedRoute><Monitor /></ProtectedRoute> } 
+        />
+
+        {/* เส้นทางสำหรับหน้า Monitor โหมดจำลอง */}
+        <Route 
+            path="/admin/monitor-mock" 
+            element={ <ProtectedRoute><MonitorMock /></ProtectedRoute> } 
         />
         
         <Route 

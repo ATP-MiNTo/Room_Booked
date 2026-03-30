@@ -1,13 +1,16 @@
+// C:\Users\user\Downloads\นิพนธ์\complab-reservation\frontend\src\pages\admin\Monitor.jsx
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   RiComputerFill, RiUserFill, RiCloseLine, 
-  RiTimerFill, RiUserForbidFill, RiToolsFill 
+  RiTimerFill, RiUserForbidFill, RiToolsFill, RiFlaskFill
 } from 'react-icons/ri';
 import AdminLayout from './AdminLayout';
 
 export default function Monitor() {
   const [selectedSeat, setSelectedSeat] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const navigate = useNavigate();
 
   const [dbBookings, setDbBookings] = useState([]);
   const [cameraData, setCameraData] = useState([]);
@@ -18,7 +21,7 @@ export default function Monitor() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 📡 ดึงข้อมูลการจองของจริงจาก Database (ดึงทุก 1 นาที)
+  // ดึงข้อมูลการจองของจริง
   useEffect(() => {
     const fetchBookings = async () => {
       try {
@@ -37,9 +40,8 @@ export default function Monitor() {
     return () => clearInterval(interval);
   }, []);
 
-  // 🎥 ดึงข้อมูลกล้องผ่าน WebSocket ของจริง
+  // ดึงข้อมูลกล้องผ่าน WebSocket ของจริง
   useEffect(() => {
-    // ⚠️ ถ้าเพื่อนรันกล้องอยู่อีกเครื่อง ต้องเปลี่ยน localhost เป็น IP ของเพื่อนนะครับ
     const wsUrl = 'ws://localhost:8000/ws/pc-updates'; 
     const ws = new WebSocket(wsUrl);
 
@@ -59,17 +61,19 @@ export default function Monitor() {
     return () => ws.close();
   }, []);
 
-  // 🧠 ฟังก์ชันคำนวณสถานะ (เอา DB ชนกับ กล้อง)
   const getSeatData = (seatNumber) => {
     const camInfo = cameraData.find(pc => pc.pc_name === `PC${seatNumber}`) || { available: 0, pc_on: false };
     const isSitting = camInfo.available > 0; 
     const isPcOn = camInfo.pc_on; 
 
     const now = new Date();
+    // เพิ่มการเช็ควันที่ของวันนี้ (YYYY-MM-DD)
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`;
     
     const activeBooking = dbBookings.find(b => 
       String(b.seat_id) === String(seatNumber) && 
+      b.reserve_date === todayStr && // ดึงเฉพาะรายการของวันนี้
       b.start_time <= currentTimeStr && 
       b.end_time >= currentTimeStr
     );
@@ -92,7 +96,7 @@ export default function Monitor() {
         studentName: activeBooking ? `นักศึกษา (${activeBooking.student_id})` : null, 
         studentId: activeBooking?.student_id || null,
         time: activeBooking ? `${activeBooking.start_time} - ${activeBooking.end_time}` : null,
-        image: activeBooking ? `/data/face_scanner/${activeBooking.image_filename}` : null
+        image: activeBooking ? `/data/face_scanner/${activeBooking.reserve_date}/${activeBooking.image_filename}` : null
     };
   };
 
@@ -174,9 +178,19 @@ export default function Monitor() {
       <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden' }}>
         
         <div style={{ flex: 1, padding: isMobile ? '10px' : '30px', overflowY: 'auto', width: '100%' }}>
-            <h2 style={{ marginTop: 0, color: '#2c3e50', borderBottom: '2px solid #eee', paddingBottom: '15px', fontSize: isMobile ? '1.1rem' : '1.5rem', maxWidth: '950px', margin: '0 auto 25px' }}>
-                Live Monitor (สถานะห้องแล็บ B4-302)
-            </h2>
+            
+            {/* Header และปุ่มสลับไปโหมดจำลอง */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #eee', paddingBottom: '15px', maxWidth: '950px', margin: '0 auto 25px' }}>
+                <h2 style={{ margin: 0, color: '#2c3e50', fontSize: isMobile ? '1.1rem' : '1.5rem' }}>
+                    Live Monitor (สถานะห้องแล็บ B4-302)
+                </h2>
+                <div 
+                    onClick={() => navigate('/admin/monitor-mock')}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', backgroundColor: '#fdf2f8', color: '#db2777', padding: '8px 15px', borderRadius: '30px', border: '1px solid #fbcfe8', fontWeight: 'bold', fontSize: '0.9rem' }}
+                >
+                    <RiFlaskFill size={18} /> ไปโหมดจำลอง
+                </div>
+            </div>
 
             <div style={{ backgroundColor: 'white', padding: size.containerPadding, borderRadius: '15px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', maxWidth: isMobile ? '100%' : '950px', margin: '0 auto', overflowX: 'auto' }}>
                 <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f0f2f5', borderRadius: '8px', marginBottom: isMobile ? '20px' : '35px', minWidth: isMobile ? '360px' : 'auto', fontWeight: 'bold', color: '#666', fontSize: isMobile ? '0.9rem' : '1.1rem' }}>
@@ -198,6 +212,7 @@ export default function Monitor() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiTimerFill color="#facc15" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>จอง&ไม่นั่ง</span></div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiUserForbidFill color="#ef4444" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>ไม่จอง&นั่ง</span></div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiComputerFill color="#555" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>ว่าง</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><RiToolsFill color="#9e9e9e" size={20} /> <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>เสีย</span></div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: '#4CAF50', borderRadius: '50%', border: '2px solid #ddd' }}></span>
                     <span style={{fontSize: isMobile ? '0.85rem' : '1rem', fontWeight: 'bold', color: '#555'}}>หน้าจอเปิด</span>
@@ -243,7 +258,34 @@ export default function Monitor() {
                             <div style={{ marginTop: '20px' }}>
                                 <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '10px', fontWeight: 'bold' }}>ภาพสแกนใบหน้าตอนจอง:</div>
                                 {selectedSeat.image ? (
-                                    <img src={selectedSeat.image} alt="Face Scan" style={{ width: '100%', height: '220px', objectFit: 'cover', borderRadius: '10px', border: '1px solid #ddd', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }} />
+                                    <img 
+                                        src={selectedSeat.image} 
+                                        alt="Face Scan" 
+                                        style={{ 
+                                            width: '100%', 
+                                            height: '220px', 
+                                            objectFit: 'contain', 
+                                            backgroundColor: '#f0f2f5', 
+                                            borderRadius: '10px', 
+                                            border: '1px solid #ddd', 
+                                            boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+                                            cursor: 'zoom-in', 
+                                            transition: 'transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), z-index 0.3s', 
+                                            position: 'relative',
+                                            zIndex: 1,
+                                            transformOrigin: 'center right' 
+                                        }} 
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.transform = 'scale(1.8)'; 
+                                            e.currentTarget.style.zIndex = '100';
+                                            e.currentTarget.style.boxShadow = '0 15px 30px rgba(0,0,0,0.3)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.transform = 'scale(1)'; 
+                                            e.currentTarget.style.zIndex = '1';
+                                            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.05)';
+                                        }}
+                                    />
                                 ) : (
                                     <div style={{ width: '100%', height: '220px', backgroundColor: '#eee', display:'flex', alignItems:'center', justifyContent:'center', borderRadius: '10px', color: '#999' }}>ไม่มีรูปภาพ</div>
                                 )}
@@ -253,7 +295,7 @@ export default function Monitor() {
 
                     {selectedSeat.status === 'unbooked_occupied' && (
                         <div style={{ backgroundColor: '#fff1f0', padding: '20px', borderRadius: '10px', border: '2px dashed #ffccc7', color: '#cf1322', fontSize: '1rem', marginBottom: '25px', lineHeight: '1.6' }}>
-                            <strong style={{fontSize: '1.1rem'}}>⚠️ ตรวจพบการใช้งานโดยไม่มีการจอง</strong> <br/><br/>
+                            <strong style={{fontSize: '1.1rem'}}>ตรวจพบการใช้งานโดยไม่มีการจอง</strong> <br/><br/>
                             (พื้นที่แสดงภาพจากกล้องแบบ Real-time เพื่อบันทึกผู้กระทำผิด)
                         </div>
                     )}

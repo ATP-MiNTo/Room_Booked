@@ -1,13 +1,16 @@
+// C:\Users\user\Downloads\นิพนธ์\complab-reservation\frontend\src\pages\admin\MonitorMock.jsx
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   RiComputerFill, RiUserFill, RiCloseLine, 
-  RiTimerFill, RiUserForbidFill, RiToolsFill, RiSettings3Fill
+  RiTimerFill, RiUserForbidFill, RiToolsFill, RiSettings3Fill, RiArrowGoBackFill
 } from 'react-icons/ri';
 import AdminLayout from './AdminLayout';
 
 export default function MonitorMock() {
   const [selectedSeatNum, setSelectedSeatNum] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const navigate = useNavigate();
 
   const [showMockPanel, setShowMockPanel] = useState(false);
   const [controlSeatNum, setControlSeatNum] = useState(1); 
@@ -28,6 +31,7 @@ export default function MonitorMock() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // ดึงข้อมูลการจองของจริง
   useEffect(() => {
     const fetchBookings = async () => {
       try {
@@ -45,13 +49,11 @@ export default function MonitorMock() {
     return () => clearInterval(interval);
   }, []);
 
-  // ฟังก์ชันเปลี่ยนค่าจำลองแบบอัจฉริยะ (ผูกค่าเข้าด้วยกัน)
   const updateMockCamera = (seatNum, field, value) => {
       setMockCameraState(prev => {
           const currentSeat = prev[seatNum];
           let newState = { ...currentSeat, [field]: value };
           
-          // 1. ถ้ากดเครื่องเสีย ให้รีเซ็ตอันอื่นให้หมด
           if (field === 'is_broken' && value === true) {
               newState.is_mock_booked = false;
               newState.available = 0;
@@ -60,24 +62,19 @@ export default function MonitorMock() {
               newState.is_broken = false;
           }
 
-          // 2. ผูกสถานะคนนั่ง(available) เข้ากับสถานะจอภาพ(pc_on)
           if (field === 'available') {
-              if (value === 1) newState.pc_on = false; // นั่งแต่คอมปิด -> บังคับปิดจอ
-              if (value === 2) newState.pc_on = true;  // กำลังใช้งาน -> บังคับเปิดจอ
+              if (value === 1) newState.pc_on = false; 
+              if (value === 2) newState.pc_on = true;  
           } 
-          // 3. ถ้าไปกดเปิด/ปิดจอเอง ก็ให้สถานะคนนั่งวิ่งตามด้วย 
           else if (field === 'pc_on') {
               if (value === true && currentSeat.available === 1) {
-                  newState.available = 2; // ถ้าคนนั่งอยู่แล้วกดเปิดจอ -> เปลี่ยนเป็น 2
+                  newState.available = 2; 
               } else if (value === false && currentSeat.available === 2) {
-                  newState.available = 1; // ถ้าคนกำลังใช้งานแล้วกดปิดจอ -> เปลี่ยนเป็น 1
+                  newState.available = 1; 
               }
           }
 
-          return {
-              ...prev,
-              [seatNum]: newState
-          };
+          return { ...prev, [seatNum]: newState };
       });
   };
 
@@ -89,10 +86,13 @@ export default function MonitorMock() {
     const isBroken = camInfo.is_broken;
 
     const now = new Date();
+    // เพิ่มการเช็ควันที่ของวันนี้ (YYYY-MM-DD)
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`;
     
     const activeDbBooking = dbBookings.find(b => 
       String(b.seat_id) === String(seatNumber) && 
+      b.reserve_date === todayStr && // ดึงเฉพาะรายการของวันนี้
       b.start_time <= currentTimeStr && 
       b.end_time >= currentTimeStr
     );
@@ -119,7 +119,7 @@ export default function MonitorMock() {
         studentName: activeDbBooking ? `นักศึกษา (${activeDbBooking.student_id})` : (isMockBooked ? "นักศึกษา (ข้อมูลจำลอง)" : null), 
         studentId: activeDbBooking?.student_id || (isMockBooked ? "MOCK-123456" : null),
         time: activeDbBooking ? `${activeDbBooking.start_time} - ${activeDbBooking.end_time}` : (isMockBooked ? "09:00 - 12:00 (จำลอง)" : null),
-        image: activeDbBooking ? `/data/face_scanner/${activeDbBooking.image_filename}` : null
+        image: activeDbBooking ? `/data/face_scanner/${activeDbBooking.reserve_date}/${activeDbBooking.image_filename}` : null
     };
   };
 
@@ -202,14 +202,24 @@ export default function MonitorMock() {
 
   return (
     <AdminLayout>
-      <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden' }}>
+      <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden', backgroundColor: '#fff5f8' }}>
         
         <div style={{ flex: 1, padding: isMobile ? '10px' : '30px', overflowY: 'auto', width: '100%', paddingBottom: '100px' }}>
-            <h2 style={{ marginTop: 0, color: '#2c3e50', borderBottom: '2px solid #eee', paddingBottom: '15px', fontSize: isMobile ? '1.1rem' : '1.5rem', maxWidth: '950px', margin: '0 auto 25px' }}>
-                Live Monitor (โหมดจำลอง)
-            </h2>
+            
+            {/* Header และปุ่มสลับกลับไปโหมดปกติ */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #eee', paddingBottom: '15px', maxWidth: '950px', margin: '0 auto 25px' }}>
+                <h2 style={{ margin: 0, color: '#2c3e50', fontSize: isMobile ? '1.1rem' : '1.5rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    Live Monitor <span style={{fontSize: '0.9rem', backgroundColor: '#db2777', color: 'white', padding: '4px 10px', borderRadius: '20px'}}>โหมดจำลอง</span>
+                </h2>
+                <div 
+                    onClick={() => navigate('/admin/monitor')}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', backgroundColor: '#f0f2f5', color: '#555', padding: '8px 15px', borderRadius: '30px', border: '1px solid #ddd', fontWeight: 'bold', fontSize: '0.9rem' }}
+                >
+                    <RiArrowGoBackFill size={18} /> กลับไปโหมดปกติ
+                </div>
+            </div>
 
-            <div style={{ backgroundColor: 'white', padding: size.containerPadding, borderRadius: '15px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', maxWidth: isMobile ? '100%' : '950px', margin: '0 auto', overflowX: 'auto' }}>
+            <div style={{ backgroundColor: 'white', padding: size.containerPadding, borderRadius: '15px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', maxWidth: isMobile ? '100%' : '950px', margin: '0 auto', overflowX: 'auto', border: '2px solid #fbcfe8' }}>
                 <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f0f2f5', borderRadius: '8px', marginBottom: isMobile ? '20px' : '35px', minWidth: isMobile ? '360px' : 'auto', fontWeight: 'bold', color: '#666', fontSize: isMobile ? '0.9rem' : '1.1rem' }}>
                     กระดานหน้าชั้นเรียน / จอโปรเจคเตอร์
                 </div>
@@ -274,7 +284,34 @@ export default function MonitorMock() {
                             <div style={{ marginTop: '20px' }}>
                                 <div style={{ fontSize: '0.9rem', color: '#666', marginBottom: '10px', fontWeight: 'bold' }}>ภาพสแกนใบหน้าตอนจอง:</div>
                                 {selectedSeatData.image ? (
-                                    <img src={selectedSeatData.image} alt="Face Scan" style={{ width: '100%', height: '220px', objectFit: 'cover', borderRadius: '10px', border: '1px solid #ddd', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }} />
+                                    <img 
+                                        src={selectedSeatData.image} 
+                                        alt="Face Scan" 
+                                        style={{ 
+                                            width: '100%', 
+                                            height: '220px', 
+                                            objectFit: 'contain', 
+                                            backgroundColor: '#f0f2f5', 
+                                            borderRadius: '10px', 
+                                            border: '1px solid #ddd', 
+                                            boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+                                            cursor: 'zoom-in', 
+                                            transition: 'transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), z-index 0.3s', 
+                                            position: 'relative',
+                                            zIndex: 1,
+                                            transformOrigin: 'center right' 
+                                        }} 
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.transform = 'scale(1.8)'; 
+                                            e.currentTarget.style.zIndex = '100';
+                                            e.currentTarget.style.boxShadow = '0 15px 30px rgba(0,0,0,0.3)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.transform = 'scale(1)'; 
+                                            e.currentTarget.style.zIndex = '1';
+                                            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.05)';
+                                        }}
+                                    />
                                 ) : (
                                     <div style={{ width: '100%', height: '220px', backgroundColor: '#eee', display:'flex', alignItems:'center', justifyContent:'center', borderRadius: '10px', color: '#999', fontSize: '0.9rem', border: '2px dashed #ccc' }}>
                                         {selectedSeatData.is_mock_booked ? 'ไม่มีรูปภาพ (ข้อมูลจำลอง)' : 'ไม่มีรูปภาพ'}
@@ -286,14 +323,14 @@ export default function MonitorMock() {
 
                     {selectedSeatData.status === 'unbooked_occupied' && (
                         <div style={{ backgroundColor: '#fff1f0', padding: '20px', borderRadius: '10px', border: '2px dashed #ffccc7', color: '#cf1322', fontSize: '1rem', marginBottom: '25px', lineHeight: '1.6' }}>
-                            <strong style={{fontSize: '1.1rem'}}>⚠️ ตรวจพบการใช้งานโดยไม่มีการจอง</strong> <br/><br/>
+                            <strong style={{fontSize: '1.1rem'}}>ตรวจพบการใช้งานโดยไม่มีการจอง</strong> <br/><br/>
                             (พื้นที่แสดงภาพจากกล้องแบบ Real-time เพื่อบันทึกผู้กระทำผิด)
                         </div>
                     )}
 
                     {selectedSeatData.status === 'broken' && (
                         <div style={{ backgroundColor: '#f5f5f5', padding: '20px', borderRadius: '10px', border: '2px dashed #d9d9d9', color: '#595959', fontSize: '1rem', marginBottom: '25px', lineHeight: '1.6' }}>
-                            <strong style={{fontSize: '1.1rem'}}>🛠️ หมายเหตุการแจ้งซ่อม:</strong><br/>
+                            <strong style={{fontSize: '1.1rem'}}>หมายเหตุการแจ้งซ่อม:</strong><br/>
                             เครื่องขัดข้องชั่วคราว (ข้อมูลจำลองจากระบบ Admin)
                         </div>
                     )}
@@ -301,7 +338,7 @@ export default function MonitorMock() {
             )}
         </div>
 
-        {/* ================= 🎛️ หน้าต่างควบคุม (Floating Panel) ================= */}
+        {/* แผงควบคุม */}
         {!showMockPanel && (
             <div 
                 onClick={() => setShowMockPanel(true)} 
@@ -401,7 +438,7 @@ export default function MonitorMock() {
                         </div>
                         
                         <div style={{ marginBottom: '15px' }}>
-                            <label style={{ display: 'block', fontSize: '0.9rem', color: '#555', marginBottom: '10px', fontWeight: 'bold' }}>👤 ตรวจจับคนนั่ง (YOLOv8)</label>
+                            <label style={{ display: 'block', fontSize: '0.9rem', color: '#555', marginBottom: '10px', fontWeight: 'bold' }}>ตรวจจับคนนั่ง (YOLOv8)</label>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.95rem' }}>
                                     <input 

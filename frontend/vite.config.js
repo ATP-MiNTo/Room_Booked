@@ -7,6 +7,13 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    allowedHosts: true 
+    allowedHosts: true,
+    // เพิ่มการตั้งค่า Proxy ตรงนี้
+    proxy: {
+      '/data': 'http://localhost:8000',
+      '/reservations': 'http://localhost:8000',
+      '/booked-seats': 'http://localhost:8000',
+      '/reserve-with-image': 'http://localhost:8000'
+    }
   }
 })
