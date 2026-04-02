@@ -4,6 +4,7 @@ from ultralytics import YOLO
 import time
 import torch
 import os
+import argparse
 import pandas as pd
 import random
 import threading
@@ -57,6 +58,29 @@ def load_runtime_config(config_path):
 
 
 CONFIG = load_runtime_config(CONFIG_FILE_PATH)
+
+
+def parse_cli_args():
+    parser = argparse.ArgumentParser(description="Threaded video mode with optional eval mode")
+    parser.add_argument("--eval", dest="eval_mode", action="store_true", help="Enable evaluation mode")
+    parser.add_argument("--eval-tag", default="", help="Custom tag for eval outputs")
+    parser.add_argument("--eval-sample-sec", type=float, default=1.0, help="Eval sample period in seconds")
+    parser.add_argument(
+        "--groundtruth-dir",
+        default=os.path.join("tool", "groundtruth"),
+        help="Groundtruth CSV directory",
+    )
+    parser.add_argument(
+        "--eval-log-dir",
+        default="",
+        help="Eval output root directory (default: <VIDEO_LOG_BASE_DIR>/eval)",
+    )
+    parser.add_argument("--video-input-dir", default="", help="Override VIDEO_INPUT_DIR for this run")
+    args, _ = parser.parse_known_args()
+    return args
+
+
+CLI_ARGS = parse_cli_args()
 
 # Camera settings
 CAM_INDEXES = [int(idx) for idx in _require_config_value(CONFIG, "CAM_INDEXES")]
@@ -145,6 +169,16 @@ PERF_SUMMARY_FILE = os.path.join(
     LOG_BASE_DIR,
     VIDEO_PERF_SUMMARY_FILENAME,
 )
+
+if CLI_ARGS.video_input_dir:
+    VIDEO_INPUT_DIR = os.path.normpath(str(CLI_ARGS.video_input_dir))
+
+EVAL_MODE = bool(CLI_ARGS.eval_mode)
+EVAL_SAMPLE_SEC = max(0.1, float(CLI_ARGS.eval_sample_sec))
+EVAL_TAG = str(CLI_ARGS.eval_tag).strip() or time.strftime("eval_%Y%m%d_%H%M%S", time.localtime())
+GROUNDTRUTH_DIR = os.path.normpath(str(CLI_ARGS.groundtruth_dir))
+EVAL_LOG_ROOT = os.path.normpath(str(CLI_ARGS.eval_log_dir)) if str(CLI_ARGS.eval_log_dir).strip() else os.path.join(LOG_BASE_DIR, "eval")
+MODEL_NAME_FOR_LOG = os.path.basename(MODEL_PATH)
 
 # ----------------------------------------------------------------------------------------------
 
@@ -664,6 +698,345 @@ def day_tag_from_time_text(time_text, fallback_day_tag):
     return fallback_day_tag
 
 
+def get_groundtruth_csv_path(cam_label):
+    return os.path.join(GROUNDTRUTH_DIR, f"{cam_label}_gt.csv")
+
+
+def load_groundtruth_for_camera(cam_name, cam_label):
+    csv_path = get_groundtruth_csv_path(cam_label)
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(
+            f"Eval mode requires groundtruth file: {csv_path} (camera: {cam_name})"
+        )
+
+    df = pd.read_csv(csv_path)
+    required_cols = {"time", "cam_name", "pc_name", "occupied_gt", "people_count_gt"}
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        raise ValueError(f"Groundtruth file missing columns {missing}: {csv_path}")
+
+    lookup = {}
+    for _, row in df.iterrows():
+        time_text = str(row.get("time", "")).strip()
+        pc_name = str(row.get("pc_name", "")).strip()
+        if not time_text or not pc_name:
+            continue
+
+        occupied_raw = row.get("occupied_gt", 0)
+        people_raw = row.get("people_count_gt", 0)
+
+        try:
+            occupied_val = int(float(occupied_raw))
+        except Exception:
+            occupied_val = 0
+        occupied_val = 1 if occupied_val > 0 else 0
+
+        try:
+            people_count_val = max(0, int(float(people_raw)))
+        except Exception:
+            people_count_val = 0
+
+        lookup[(time_text, pc_name)] = {
+            "occupied_gt": occupied_val,
+            "people_count_gt": people_count_val,
+            "user_ids_gt": str(row.get("user_ids_gt", "")).strip(),
+        }
+
+    if not lookup:
+        raise ValueError(f"Groundtruth file has no usable rows: {csv_path}")
+
+    return {
+        "path": csv_path,
+        "lookup": lookup,
+    }
+
+
+def update_eval_sessions(cam_data, pc_name, current_person_id, now_ts):
+    active = cam_data.setdefault("eval_active_sessions", {})
+    sessions = cam_data.setdefault("eval_user_sessions", [])
+
+    current_person = str(current_person_id).strip() if current_person_id else ""
+    existing = active.get(pc_name)
+
+    if current_person:
+        if not existing:
+            active[pc_name] = {
+                "person_id_pred": current_person,
+                "start_ts": float(now_ts),
+                "start_time": format_video_timestamp(now_ts),
+            }
+        elif existing.get("person_id_pred") != current_person:
+            sessions.append(
+                {
+                    "pc_name": pc_name,
+                    "person_id_pred": existing.get("person_id_pred", ""),
+                    "start_time": existing.get("start_time", ""),
+                    "end_time": format_video_timestamp(now_ts),
+                    "duration_sec": round(max(0.0, float(now_ts) - float(existing.get("start_ts", now_ts))), 2),
+                }
+            )
+            active[pc_name] = {
+                "person_id_pred": current_person,
+                "start_ts": float(now_ts),
+                "start_time": format_video_timestamp(now_ts),
+            }
+    elif existing:
+        sessions.append(
+            {
+                "pc_name": pc_name,
+                "person_id_pred": existing.get("person_id_pred", ""),
+                "start_time": existing.get("start_time", ""),
+                "end_time": format_video_timestamp(now_ts),
+                "duration_sec": round(max(0.0, float(now_ts) - float(existing.get("start_ts", now_ts))), 2),
+            }
+        )
+        active.pop(pc_name, None)
+
+
+def collect_eval_rows(cam_idx, cam_data, sample_ts):
+    if not EVAL_MODE:
+        return
+
+    gt_lookup = cam_data.get("eval_groundtruth", {}).get("lookup", {})
+    if not gt_lookup:
+        return
+
+    sample_time_text = format_video_timestamp(sample_ts)
+    sample_clock = format_video_clock(sample_ts)
+    pc_states = cam_data.get("pc_states", {})
+    pc_people_counts = cam_data.get("last_pc_people_counts", {})
+    source_video = os.path.basename(str(cam_data.get("source_path", "")))
+
+    for pc_name in sorted(pc_states.keys(), key=pc_name_sort_key):
+        state = pc_states.get(pc_name, {})
+        pred_occupied = 1 if bool(state.get("person_present")) else 0
+        pred_people_count = int(pc_people_counts.get(pc_name, 0))
+        current_person_id = state.get("current_person_id")
+        current_person_text = str(current_person_id) if current_person_id else ""
+
+        gt = gt_lookup.get((sample_time_text, pc_name), {})
+        occupied_gt = gt.get("occupied_gt", "")
+        people_count_gt = gt.get("people_count_gt", "")
+
+        match_occupied = ""
+        abs_people_count_error = ""
+        if occupied_gt != "":
+            match_occupied = int(pred_occupied == int(occupied_gt))
+        if people_count_gt != "":
+            abs_people_count_error = abs(int(pred_people_count) - int(people_count_gt))
+
+        cam_data.setdefault("eval_detail_rows", []).append(
+            {
+                "eval_tag": EVAL_TAG,
+                "model_name": MODEL_NAME_FOR_LOG,
+                "source_video": source_video,
+                "time": sample_time_text,
+                "clock": sample_clock,
+                "t_sec": round(float(sample_ts), 2),
+                "cam_idx": cam_idx,
+                "cam_name": cam_data.get("name", ""),
+                "pc_name": pc_name,
+                "occupied_pred": pred_occupied,
+                "people_count_pred": pred_people_count,
+                "current_person_ids_pred": current_person_text,
+                "occupied_gt": occupied_gt,
+                "people_count_gt": people_count_gt,
+                "match_occupied": match_occupied,
+                "abs_people_count_error": abs_people_count_error,
+            }
+        )
+
+        update_eval_sessions(cam_data, pc_name, current_person_id, sample_ts)
+
+
+def flush_eval_active_sessions(cam_data, end_ts):
+    if not EVAL_MODE:
+        return
+
+    active = cam_data.get("eval_active_sessions", {})
+    if not active:
+        return
+
+    sessions = cam_data.setdefault("eval_user_sessions", [])
+    for pc_name, existing in list(active.items()):
+        sessions.append(
+            {
+                "pc_name": pc_name,
+                "person_id_pred": existing.get("person_id_pred", ""),
+                "start_time": existing.get("start_time", ""),
+                "end_time": format_video_timestamp(end_ts),
+                "duration_sec": round(max(0.0, float(end_ts) - float(existing.get("start_ts", end_ts))), 2),
+            }
+        )
+    active.clear()
+
+
+def compute_eval_metrics_for_rows(rows):
+    scored_rows = [
+        row for row in rows
+        if row.get("occupied_gt", "") != "" and row.get("people_count_gt", "") != ""
+    ]
+    if not scored_rows:
+        return None
+
+    tp = tn = fp = fn = 0
+    people_abs_errors = []
+    people_exact_matches = 0
+
+    for row in scored_rows:
+        pred = int(row.get("occupied_pred", 0))
+        gt = int(row.get("occupied_gt", 0))
+        pred_people = int(row.get("people_count_pred", 0))
+        gt_people = int(row.get("people_count_gt", 0))
+
+        if pred == 1 and gt == 1:
+            tp += 1
+        elif pred == 0 and gt == 0:
+            tn += 1
+        elif pred == 1 and gt == 0:
+            fp += 1
+        elif pred == 0 and gt == 1:
+            fn += 1
+
+        err = abs(pred_people - gt_people)
+        people_abs_errors.append(err)
+        if err == 0:
+            people_exact_matches += 1
+
+    total = tp + tn + fp + fn
+    accuracy = (tp + tn) / total if total > 0 else 0.0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+    mae_people_count = (sum(people_abs_errors) / len(people_abs_errors)) if people_abs_errors else 0.0
+    match_rate_people_count_exact = (people_exact_matches / len(people_abs_errors)) if people_abs_errors else 0.0
+
+    return {
+        "samples": total,
+        "tp": tp,
+        "tn": tn,
+        "fp": fp,
+        "fn": fn,
+        "accuracy": round(accuracy, 4),
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "mae_people_count": round(mae_people_count, 4),
+        "match_rate_people_count_exact": round(match_rate_people_count_exact, 4),
+    }
+
+
+def write_eval_outputs(cams):
+    if not EVAL_MODE:
+        return
+
+    os.makedirs(EVAL_LOG_ROOT, exist_ok=True)
+    summary_rows = []
+    all_detail_rows = []
+
+    for cam_idx, cam_data in cams.items():
+        cam_label = cam_data.get("label", to_safe_label(cam_data.get("name", f"cam{cam_idx}")))
+        cam_name = cam_data.get("name", cam_label)
+        cam_eval_dir = os.path.join(EVAL_LOG_ROOT, cam_label)
+        os.makedirs(cam_eval_dir, exist_ok=True)
+
+        final_ts = float(cam_data.get("last_video_time", 0.0))
+        flush_eval_active_sessions(cam_data, final_ts)
+
+        detail_rows = cam_data.get("eval_detail_rows", [])
+        all_detail_rows.extend(detail_rows)
+        detail_path = os.path.join(cam_eval_dir, f"eval_detail_{cam_label}_{EVAL_TAG}.csv")
+        detail_columns = [
+            "eval_tag", "model_name", "source_video", "time", "clock", "t_sec", "cam_idx", "cam_name",
+            "pc_name", "occupied_pred", "people_count_pred", "current_person_ids_pred",
+            "occupied_gt", "people_count_gt", "match_occupied", "abs_people_count_error",
+        ]
+        pd.DataFrame(detail_rows, columns=detail_columns).to_csv(detail_path, index=False)
+
+        session_rows = []
+        for session in cam_data.get("eval_user_sessions", []):
+            session_rows.append(
+                {
+                    "eval_tag": EVAL_TAG,
+                    "model_name": MODEL_NAME_FOR_LOG,
+                    "source_video": os.path.basename(str(cam_data.get("source_path", ""))),
+                    "cam_name": cam_name,
+                    "pc_name": session.get("pc_name", ""),
+                    "person_id_pred": session.get("person_id_pred", ""),
+                    "start_time": session.get("start_time", ""),
+                    "end_time": session.get("end_time", ""),
+                    "duration_sec": session.get("duration_sec", 0.0),
+                }
+            )
+
+        session_path = os.path.join(cam_eval_dir, f"eval_sessions_{cam_label}_{EVAL_TAG}.csv")
+        session_columns = [
+            "eval_tag", "model_name", "source_video", "cam_name", "pc_name", "person_id_pred",
+            "start_time", "end_time", "duration_sec",
+        ]
+        pd.DataFrame(session_rows, columns=session_columns).to_csv(session_path, index=False)
+
+        if detail_rows:
+            cam_df = pd.DataFrame(detail_rows)
+            for pc_name, group in cam_df.groupby("pc_name"):
+                metrics = compute_eval_metrics_for_rows(group.to_dict("records"))
+                if metrics is None:
+                    continue
+                summary_rows.append(
+                    {
+                        "eval_tag": EVAL_TAG,
+                        "model_name": MODEL_NAME_FOR_LOG,
+                        "cam_name": cam_name,
+                        "pc_name": pc_name,
+                        **metrics,
+                    }
+                )
+
+            cam_metrics = compute_eval_metrics_for_rows(detail_rows)
+            if cam_metrics is not None:
+                summary_rows.append(
+                    {
+                        "eval_tag": EVAL_TAG,
+                        "model_name": MODEL_NAME_FOR_LOG,
+                        "cam_name": cam_name,
+                        "pc_name": "ALL",
+                        **cam_metrics,
+                    }
+                )
+
+    global_metrics = compute_eval_metrics_for_rows(all_detail_rows)
+    if global_metrics is not None:
+        summary_rows.append(
+            {
+                "eval_tag": EVAL_TAG,
+                "model_name": MODEL_NAME_FOR_LOG,
+                "cam_name": "ALL",
+                "pc_name": "ALL",
+                **global_metrics,
+            }
+        )
+
+    summary_path = os.path.join(EVAL_LOG_ROOT, f"eval_summary_{EVAL_TAG}.csv")
+    summary_columns = [
+        "eval_tag", "model_name", "cam_name", "pc_name", "samples", "tp", "tn", "fp", "fn",
+        "accuracy", "precision", "recall", "f1", "mae_people_count", "match_rate_people_count_exact",
+    ]
+    pd.DataFrame(summary_rows, columns=summary_columns).to_csv(summary_path, index=False)
+
+    print("\n=== Eval Summary ===")
+    print(f"Eval tag: {EVAL_TAG}")
+    print(f"Model: {MODEL_NAME_FOR_LOG}")
+    print(f"Eval outputs root: {EVAL_LOG_ROOT}")
+    print(f"Summary CSV: {summary_path}")
+    for row in summary_rows:
+        if row.get("pc_name") in ("ALL", ""):
+            continue
+        print(
+            f"{row['cam_name']} {row['pc_name']}: acc={row['accuracy']:.4f}, "
+            f"prec={row['precision']:.4f}, rec={row['recall']:.4f}, f1={row['f1']:.4f}"
+        )
+
+
 def append_rows_to_daily_csv(rows, columns, output_dir, file_prefix, default_day_tag):
     grouped_rows = {}
     for row in rows or []:
@@ -869,6 +1242,10 @@ def build_camera_states():
                 print(f"{cam_name}: loaded {len(monitor_rois)} monitor ROI(s)")
 
         pc_states = init_pc_states(pc_rois, monitor_rois)
+        eval_groundtruth = None
+        if EVAL_MODE:
+            eval_groundtruth = load_groundtruth_for_camera(cam_name, cam_label)
+            print(f"{cam_name}: loaded groundtruth -> {eval_groundtruth['path']}")
 
         cams[cam_idx] = {
             "cap": cap,
@@ -908,6 +1285,12 @@ def build_camera_states():
             "pc_states": pc_states,
             "pc_event_logs": [],
             "pc_unattended_logs": [],
+            "last_pc_people_counts": {},
+            "eval_groundtruth": eval_groundtruth,
+            "eval_detail_rows": [],
+            "eval_user_sessions": [],
+            "eval_active_sessions": {},
+            "next_eval_sample_ts": 0.0,
         }
         os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
         os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
@@ -945,6 +1328,9 @@ def print_session_banner(cams):
     if FRAME_CAP_FPS > 0:
         print(f"Frame cap: {FRAME_CAP_FPS:.1f} FPS")
     print(f"Logs root: {LOG_BASE_DIR}")
+    if EVAL_MODE:
+        print(f"Eval mode: ON | sample={EVAL_SAMPLE_SEC:.1f}s | groundtruth={GROUNDTRUTH_DIR}")
+        print(f"Eval output root: {EVAL_LOG_ROOT}")
     for cam_data in cams.values():
         print(f"- {cam_data['name']} <= {cam_data['source_path']}")
     print("Press 'q' to quit")
@@ -1015,6 +1401,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     cam_data["first_frame_time"] = loop_wall_start
 
                 pc_to_person = {}
+                pc_people_counts = {}
                 matched_track_ids = set()
 
                 for box in results[0].boxes:
@@ -1027,6 +1414,8 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                         
                         # determine which PC this person is in
                         current_pc = get_pc_for_box(current_box, cam_data["pc_rois"]) if ENABLE_PC_ROI else None
+                        if current_pc:
+                            pc_people_counts[current_pc] = pc_people_counts.get(current_pc, 0) + 1
                         
                         matched_id = match_box_to_person(
                             current_box,
@@ -1143,6 +1532,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 prune_stale_tracks(cam_data["tracked_persons"], frame_time_sec)
 
                 pc_to_person_map = {pc_name: data[1] for pc_name, data in pc_to_person.items()}
+                cam_data["last_pc_people_counts"] = pc_people_counts
                 update_pc_states_from_monitor(frame, cam_data.get("monitor_rois", []), cam_data.get("pc_states", {}), frame_time_sec)
                 update_pc_activity_events(
                     cam_data["name"],
@@ -1176,6 +1566,15 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     cam_data["last_annotated_frame"] = frame.copy()
             else:
                 update_smoothed_person_count(cam_data, 0, frame_time_sec)
+
+            if EVAL_MODE:
+                next_sample_ts = float(cam_data.get("next_eval_sample_ts", 0.0))
+                if next_sample_ts <= 0.0:
+                    next_sample_ts = float(frame_time_sec)
+                while frame_time_sec >= next_sample_ts:
+                    collect_eval_rows(cam_idx, cam_data, next_sample_ts)
+                    next_sample_ts += EVAL_SAMPLE_SEC
+                cam_data["next_eval_sample_ts"] = next_sample_ts
 
             frame_end = time.time()
             latency_ms = (frame_end - loop_wall_start) * 1000.0
@@ -1418,6 +1817,9 @@ def save_session_outputs(cams, run_start_day_tag, pc_state_all_csv):
 
     # create daily summary report
     create_daily_summary_report(cams, run_start_day_tag, LOG_BASE_DIR)
+
+    if EVAL_MODE:
+        write_eval_outputs(cams)
 
     # Clean up empty log folders
     cleanup_empty_log_folders(LOG_BASE_DIR)

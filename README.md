@@ -22,6 +22,9 @@ YOLOv8-based people detection with PC/seat usage logic for both live cameras and
 - PC activity event logs (`USING_PC` / `NON_PC_ACTIVITY`)
 - Unattended/person-flag logic (`reason=1` / `reason=2`)
 - Realtime all-PC compact state CSV (`pc_name,pc_on,availble`)
+- Offline eval mode with per-seat accuracy and count-error reporting
+- Groundtruth CSV workflow under `tool/groundtruth/`
+- Groundtruth labeling helper for manual seat labeling from video
 - REST API endpoints for booking website integration (local network)
 - WebSocket stream for realtime all-PC status push
 - Smoothed people counter (mode over time window)
@@ -95,6 +98,14 @@ python tool\roi_edit_setup.py
 python tool\see_roi_conf.py
 ```
 
+### 4) Label groundtruth for eval
+
+```powershell
+python tool\groundtruth_labeler.py
+```
+
+If you omit `--video`, a file picker opens. The helper saves per-camera groundtruth CSV files under `tool\groundtruth\` using the camera label, for example `Front_left_gt.csv`.
+
 ---
 
 ## Configuration
@@ -147,8 +158,29 @@ Notes:
 - Uses video-time timestamps for event/state logs
 - Uses video filename stem for source label + per-source log naming
 - Outputs go under `VIDEO_LOG_BASE_DIR` (default `logs_video_mode`)
+- Default run mode is unchanged if `--eval` is not passed
 
 For ROI reuse, keep video filenames aligned with ROI camera labels (example: `Front_right.mp4`, `Back_left.mp4`).
+
+### Eval Mode
+
+```powershell
+python tool\threaded_video_mode.py --eval
+```
+
+Eval mode loads groundtruth from `tool\groundtruth\{CameraLabel}_gt.csv` and writes:
+
+- per-camera detailed eval logs
+- per-camera user-seat session intervals
+- eval summary CSV with per-seat accuracy, precision, recall, F1, and count error
+
+Optional eval arguments:
+
+- `--eval-tag <name>` to tag output files
+- `--eval-sample-sec <seconds>` to change the sampling interval
+- `--groundtruth-dir <path>` to point to another groundtruth folder
+- `--eval-log-dir <path>` to change the eval output root
+- `--video-input-dir <path>` to override the video folder for one run
 
 ---
 
@@ -176,18 +208,6 @@ Open API docs:
 
 - `GET /api/pc-status`
     - Current all-PC compact state from `logs/pc_state_all.csv`.
-- `GET /api/people?camera=&date=&person_id=&limit=`
-    - Person snapshot/detection logs from per-camera daily CSVs.
-- `GET /api/pc-activity?camera=&pc_name=&date=&event_type=&limit=`
-    - PC activity events (`USING_PC`, `NON_PC_ACTIVITY`).
-- `GET /api/unattended?date=&pc_name=&reason=&limit=`
-    - Combined unattended/person-flag logs (`reason=1` / `reason=2`).
-- `GET /api/performance?date=`
-    - Session performance summary rows.
-- `GET /api/cameras`
-    - Camera/source summary + latest known performance row.
-- `GET /api/dates`
-    - Available date list with cameras that have data.
 - `WS /ws/pc-updates`
     - Realtime push stream (about once per second) of all-PC status.
 
@@ -208,6 +228,13 @@ Per-source logs (live and video mode follow same structure under different root 
 - `{LOG_ROOT}/pc_state_all.csv` (realtime overwrite)
 - `{LOG_ROOT}/roi_images/{SourceName}/{PersonID}/...`
 - `{LOG_ROOT}/performance_summary.csv`
+
+Eval outputs:
+
+- `tool/groundtruth/{CameraLabel}_gt.csv`
+- `{EVAL_LOG_ROOT}/{CameraLabel}/eval_detail_{CameraLabel}_{EvalTag}.csv`
+- `{EVAL_LOG_ROOT}/{CameraLabel}/eval_sessions_{CameraLabel}_{EvalTag}.csv`
+- `{EVAL_LOG_ROOT}/eval_summary_{EvalTag}.csv`
 
 Realtime compact state schema:
 
@@ -244,6 +271,16 @@ PC2,"[[x1,y1], [x2,y2], [x3,y3], [x4,y4]]"
 
 Use matching `pc_name` values between seat and monitor ROI files.
 
+Groundtruth files use the same camera label naming convention and should include these columns:
+
+- `time`
+- `cam_name`
+- `pc_name`
+- `occupied_gt`
+- `people_count_gt`
+
+`user_ids_gt` is not used by the current eval flow.
+
 ---
 
 ## Quick Notes
@@ -251,3 +288,4 @@ Use matching `pc_name` values between seat and monitor ROI files.
 - For active work, use `threaded.py` and `tool/threaded_video_mode.py`.
 - Keep source labels and ROI filenames aligned.
 - Adjust behavior primarily through `tool/threaded_config.yaml`.
+- Use `tool/groundtruth_labeler.py` to build eval CSVs before running `--eval`.
