@@ -4,6 +4,7 @@ import json
 import os
 import statistics
 import time
+from datetime import datetime
 
 import cv2
 import numpy as np
@@ -33,8 +34,13 @@ MONITOR_POLY_COLOR = (255, 0, 255)
 
 def parse_time_to_seconds(time_text):
     try:
-        struct = time.strptime(str(time_text).strip(), "%Y-%m-%d %H:%M:%S")
-        return int(time.mktime(struct))
+        dt = datetime.strptime(str(time_text).strip(), "%Y-%m-%d %H:%M:%S")
+        return (
+            dt.toordinal() * 86400
+            + dt.hour * 3600
+            + dt.minute * 60
+            + dt.second
+        )
     except Exception:
         return None
 
@@ -79,6 +85,7 @@ def load_groundtruth_summary(csv_path):
 
     sample_sec = infer_sample_sec(sorted(set(times)))
     by_pc = {}
+    timeline_by_pc = {}
 
     for row in rows:
         pc_name = (row.get("pc_name") or "").strip()
@@ -97,12 +104,32 @@ def load_groundtruth_summary(csv_path):
                 "occupied_rows": 0,
                 "occupied_time_sec": 0.0,
             }
+            timeline_by_pc[pc_name] = {}
 
         by_pc[pc_name]["total_rows"] += 1
         by_pc[pc_name]["occupied_rows"] += occupied
+        sec = parse_time_to_seconds(row.get("time", ""))
+        if sec is not None:
+            # Last write wins for duplicate (pc_name, second).
+            timeline_by_pc[pc_name][sec] = occupied
 
     for pc_name in by_pc:
-        by_pc[pc_name]["occupied_time_sec"] = by_pc[pc_name]["occupied_rows"] * sample_sec
+        points = sorted(timeline_by_pc.get(pc_name, {}).items(), key=lambda item: item[0])
+        occupied_time = 0.0
+
+        if points:
+            for i in range(len(points) - 1):
+                cur_sec, cur_occ = points[i]
+                next_sec, _ = points[i + 1]
+                delta = max(0.0, float(next_sec - cur_sec))
+                if int(cur_occ) > 0:
+                    occupied_time += delta
+
+            # Include a tail interval for the last state using inferred sample interval.
+            if int(points[-1][1]) > 0:
+                occupied_time += float(sample_sec)
+
+        by_pc[pc_name]["occupied_time_sec"] = occupied_time
 
     return {
         "sample_sec": sample_sec,
