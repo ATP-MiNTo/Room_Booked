@@ -2,14 +2,18 @@ import csv
 import glob
 import json
 import os
+import statistics
+import time
 
 import cv2
 import numpy as np
 
 
 ROI_CONFIG_DIR = os.path.join("tool", "roi_config")
+GROUNDTRUTH_DIR = os.path.join("tool", "groundtruth")
 SEAT_CSV_SUFFIX = "_roi.csv"
 MONITOR_CSV_SUFFIX = "_monitor_roi.csv"
+GT_CSV_SUFFIX = "_gt.csv"
 WINDOW_NAME = "ROI Config Viewer"
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
@@ -25,6 +29,101 @@ TEXT_COLOR = (255, 255, 255)
 TITLE_COLOR = (0, 255, 255)
 SEAT_POLY_COLOR = (0, 255, 0)
 MONITOR_POLY_COLOR = (255, 0, 255)
+
+
+def parse_time_to_seconds(time_text):
+    try:
+        struct = time.strptime(str(time_text).strip(), "%Y-%m-%d %H:%M:%S")
+        return int(time.mktime(struct))
+    except Exception:
+        return None
+
+
+def infer_sample_sec(sorted_seconds):
+    if len(sorted_seconds) < 2:
+        return 1.0
+
+    deltas = []
+    for i in range(1, len(sorted_seconds)):
+        delta = sorted_seconds[i] - sorted_seconds[i - 1]
+        if delta > 0:
+            deltas.append(delta)
+
+    if not deltas:
+        return 1.0
+
+    try:
+        return float(max(1, int(round(statistics.median(deltas)))))
+    except Exception:
+        return 1.0
+
+
+def load_groundtruth_summary(csv_path):
+    rows = []
+    with open(csv_path, "r", encoding="utf-8", newline="") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            rows.append(row)
+
+    if not rows:
+        return {
+            "sample_sec": 1.0,
+            "by_pc": {},
+        }
+
+    times = []
+    for row in rows:
+        sec = parse_time_to_seconds(row.get("time", ""))
+        if sec is not None:
+            times.append(sec)
+
+    sample_sec = infer_sample_sec(sorted(set(times)))
+    by_pc = {}
+
+    for row in rows:
+        pc_name = (row.get("pc_name") or "").strip()
+        if not pc_name:
+            continue
+
+        occupied_raw = row.get("occupied_gt", 0)
+        try:
+            occupied = 1 if int(float(occupied_raw)) > 0 else 0
+        except Exception:
+            occupied = 0
+
+        if pc_name not in by_pc:
+            by_pc[pc_name] = {
+                "total_rows": 0,
+                "occupied_rows": 0,
+                "occupied_time_sec": 0.0,
+            }
+
+        by_pc[pc_name]["total_rows"] += 1
+        by_pc[pc_name]["occupied_rows"] += occupied
+
+    for pc_name in by_pc:
+        by_pc[pc_name]["occupied_time_sec"] = by_pc[pc_name]["occupied_rows"] * sample_sec
+
+    return {
+        "sample_sec": sample_sec,
+        "by_pc": by_pc,
+    }
+
+
+def discover_groundtruth_summaries():
+    gt_files = sorted(glob.glob(os.path.join(GROUNDTRUTH_DIR, f"*{GT_CSV_SUFFIX}")))
+    summaries = {}
+
+    for path in gt_files:
+        cam_name = os.path.basename(path)[: -len(GT_CSV_SUFFIX)]
+        try:
+            summary = load_groundtruth_summary(path)
+            summary["csv_path"] = path
+            summaries[cam_name] = summary
+        except Exception:
+            continue
+
+    return summaries
 
 
 def normalize_quad(points):
@@ -102,6 +201,11 @@ def discover_roi_setups():
         setups[cam_name]["monitor_rois"] = rois
         setups[cam_name]["monitor_csv"] = csv_path
 
+    gt_summaries = discover_groundtruth_summaries()
+    for cam_name, setup in setups.items():
+        gt = gt_summaries.get(cam_name)
+        setup["gt_summary"] = gt
+
     ordered = list(setups.values())
 
     def setup_sort_key(item):
@@ -136,6 +240,8 @@ def draw_overlay(frame, setup, cam_idx, total):
     cam_name = setup["cam_name"]
     seat_rois = setup.get("seat_rois", [])
     monitor_rois = setup.get("monitor_rois", [])
+    gt_summary = setup.get("gt_summary")
+    gt_by_pc = gt_summary.get("by_pc", {}) if gt_summary else {}
 
     cam_index = CAM_NAME_TO_INDEX.get(cam_name, "?")
     header = (
@@ -147,7 +253,13 @@ def draw_overlay(frame, setup, cam_idx, total):
     help_text = "Keys: < Prev | > Next | q Quit"
     cv2.putText(canvas, help_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, TEXT_COLOR, 2)
 
-    y = 90
+    if gt_summary:
+        gt_header = f"GT loaded | sample={gt_summary.get('sample_sec', 1.0):.1f}s"
+    else:
+        gt_header = "GT not found"
+    cv2.putText(canvas, gt_header, (10, 84), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 220, 255), 2)
+
+    y = 112
     if seat_rois:
         cv2.putText(canvas, "Seat ROI (green)", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, SEAT_POLY_COLOR, 2)
         y += 24
@@ -159,7 +271,11 @@ def draw_overlay(frame, setup, cam_idx, total):
             label_anchor = tuple(ordered[0])
             cv2.putText(canvas, roi["pc_name"], label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.65, SEAT_POLY_COLOR, 2)
 
-            cv2.putText(canvas, roi["pc_name"], (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 255, 200), 1)
+            gt_text = ""
+            if roi["pc_name"] in gt_by_pc:
+                sec = float(gt_by_pc[roi["pc_name"]].get("occupied_time_sec", 0.0))
+                gt_text = f" | GT {sec:.0f}s"
+            cv2.putText(canvas, f"{roi['pc_name']}{gt_text}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 255, 200), 1)
             y += 20
 
     if monitor_rois:
@@ -201,10 +317,19 @@ def main():
     for i, setup in enumerate(setups, start=1):
         seat_count = len(setup.get("seat_rois", []))
         monitor_count = len(setup.get("monitor_rois", []))
+        gt_summary = setup.get("gt_summary")
+        gt_info = "gt=none"
+        if gt_summary:
+            gt_info = f"gt=loaded sample={gt_summary.get('sample_sec', 1.0):.1f}s"
         print(
             f"  {i}. {setup['cam_name']} | seat={seat_count} monitor={monitor_count} "
-            f"| seat_csv={setup.get('seat_csv')} | monitor_csv={setup.get('monitor_csv')}"
+            f"| seat_csv={setup.get('seat_csv')} | monitor_csv={setup.get('monitor_csv')} | {gt_info}"
         )
+        if gt_summary:
+            gt_by_pc = gt_summary.get("by_pc", {})
+            for pc_name in sorted(gt_by_pc.keys()):
+                sec = float(gt_by_pc[pc_name].get("occupied_time_sec", 0.0))
+                print(f"      - {pc_name}: GT occupied {sec:.0f}s")
 
     active_idx = 0
     cap = open_camera(setups[active_idx]["cam_name"], active_idx)
