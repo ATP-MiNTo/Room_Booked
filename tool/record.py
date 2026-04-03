@@ -11,7 +11,7 @@ CAM_NAMES = {
     3: "Back_right",
 }
 
-record_seconds = 7200
+record_seconds = 25000
 
 fps = 20
 frame_width = 1280
