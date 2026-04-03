@@ -177,12 +177,15 @@ def main():
     play_mode = False
     selected_pc_name = ""
     sec_cursor = 0.0
+    max_sec = (total_frames / fps) if fps > 0 else 0.0
+    playback_last_tick = time.perf_counter()
 
     window_name = "Groundtruth Labeler"
     cv2.namedWindow(window_name)
 
-    def capture_current_second():
-        sec_key = int(round(sec_cursor))
+    def capture_current_second(capture_sec=None):
+        effective_sec = sec_cursor if capture_sec is None else float(capture_sec)
+        sec_key = int(max(0.0, effective_sec))
         for roi in rois:
             pc_name = roi["pc_name"]
             seat_state = current_states.get(pc_name, {"occupied": 0, "people_count": 0})
@@ -216,7 +219,7 @@ def main():
     print(f"Groundtruth output: {gt_csv_path}")
 
     while True:
-        frame_idx = int(round(sec_cursor * fps))
+        frame_idx = int(sec_cursor * fps)
         frame_idx = max(0, min(frame_idx, max(0, total_frames - 1)))
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ok, frame = cap.read()
@@ -224,16 +227,27 @@ def main():
             break
 
         if play_mode:
-            capture_current_second()
-            sec_cursor += sample_sec
-            max_sec = (total_frames / fps) if fps > 0 else sec_cursor
+            now = time.perf_counter()
+            elapsed = max(0.0, now - playback_last_tick)
+            playback_last_tick = now
+
+            prev_sec = sec_cursor
+            sec_cursor += elapsed
+            next_capture = (int(prev_sec / sample_sec) + 1) * sample_sec
+            while next_capture <= sec_cursor + 1e-9:
+                capture_current_second(next_capture)
+                next_capture += sample_sec
+
             if sec_cursor > max_sec:
                 sec_cursor = max_sec
                 play_mode = False
+        else:
+            playback_last_tick = time.perf_counter()
 
         canvas = draw_overlay(frame, rois, current_states, selected_pc_name, sec_cursor, frame_idx, total_frames, fps)
         cv2.imshow(window_name, canvas)
-        key = cv2.waitKey(20 if play_mode else 0) & 0xFF
+        play_delay_ms = max(1, int(round(1000.0 / fps))) if play_mode else 0
+        key = cv2.waitKey(play_delay_ms) & 0xFF
 
         if key == ord("q"):
             break
