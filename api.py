@@ -3,23 +3,28 @@ import glob
 import os
 import re
 import time
+import threading
+import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 
 LOG_BASE_DIR = os.path.normpath(os.getenv("BOOKING_LOG_DIR", "logs"))
 PC_STATE_CSV = os.path.join(LOG_BASE_DIR, "pc_state_all.csv")
 PERF_SUMMARY_CSV = os.path.join(LOG_BASE_DIR, "performance_summary.csv")
+USER_ID_STATE_FILE = os.path.join(LOG_BASE_DIR, "user_id_state.json")
 
 PEOPLE_GLOB = os.path.join(LOG_BASE_DIR, "*", "people_with_conf_and_roi_*_*.csv")
 PC_ACTIVITY_GLOB = os.path.join(LOG_BASE_DIR, "*", "pc_activity_events_*_*.csv")
 UNATTENDED_GLOB = os.path.join(LOG_BASE_DIR, "pc_unattended_flags_*.csv")
 
 DAY_TAG_PATTERN = re.compile(r"_(\d{8})\.csv$", re.IGNORECASE)
+USER_ID_10_DIGIT_PATTERN = re.compile(r"^\d{10}$")
 
 
 app = FastAPI(
@@ -35,6 +40,95 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class UserIdIssueRequest(BaseModel):
+    source: Optional[str] = None
+    preferred_user_id: Optional[str] = None
+
+
+class UserIdIssueResponse(BaseModel):
+    user_id: str
+    strategy: str
+    issued_at: str
+    source: Optional[str] = None
+
+
+class UserIdPoolUpdateRequest(BaseModel):
+    user_ids: List[str] = Field(default_factory=list)
+    replace: bool = False
+
+
+class UserIdPoolUpdateResponse(BaseModel):
+    pool_size: int
+    accepted_count: int
+    replaced: bool
+
+
+USER_ID_STATE_LOCK = threading.Lock()
+USER_ID_STATE: Dict[str, Any] = {
+    "pool": [],
+    "issued": [],
+}
+
+
+def clean_user_id(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text if USER_ID_10_DIGIT_PATTERN.fullmatch(text) else None
+
+
+def ensure_log_dir_exists() -> None:
+    os.makedirs(LOG_BASE_DIR, exist_ok=True)
+
+
+def load_user_id_state() -> None:
+    ensure_log_dir_exists()
+    if not os.path.exists(USER_ID_STATE_FILE):
+        return
+
+    try:
+        with open(USER_ID_STATE_FILE, "r", encoding="utf-8") as state_file:
+            loaded = json.load(state_file) or {}
+        if isinstance(loaded, dict):
+            pool = loaded.get("pool", [])
+            issued = loaded.get("issued", [])
+            USER_ID_STATE["pool"] = [str(x) for x in pool if clean_user_id(x)]
+            USER_ID_STATE["issued"] = [str(x) for x in issued if clean_user_id(x)]
+    except Exception as exc:
+        print(f"Warning: failed to load user ID state: {exc}")
+
+
+def save_user_id_state() -> None:
+    ensure_log_dir_exists()
+    try:
+        with open(USER_ID_STATE_FILE, "w", encoding="utf-8") as state_file:
+            json.dump(USER_ID_STATE, state_file, ensure_ascii=True, indent=2)
+    except Exception as exc:
+        print(f"Warning: failed to save user ID state: {exc}")
+
+
+def issue_user_id(preferred_user_id: Optional[str]) -> Dict[str, str]:
+    preferred_raw = str(preferred_user_id).strip() if preferred_user_id is not None else ""
+    preferred = clean_user_id(preferred_raw)
+    if preferred_raw and not preferred:
+        raise HTTPException(status_code=400, detail="preferred_user_id must be exactly 10 digits")
+
+    if preferred:
+        user_id = preferred
+        strategy = "preferred"
+    elif USER_ID_STATE.get("pool"):
+        user_id = str(USER_ID_STATE["pool"].pop(0))
+        strategy = "pool"
+    else:
+        raise HTTPException(status_code=409, detail="No user ID available. Please preload /api/user-ids/pool.")
+
+    USER_ID_STATE.setdefault("issued", []).append(user_id)
+    return {"user_id": user_id, "strategy": strategy}
+
+
+load_user_id_state()
 
 
 def normalize_label(value: Any) -> str:
@@ -175,6 +269,8 @@ def root() -> Dict[str, Any]:
         "log_base_dir": LOG_BASE_DIR,
         "endpoints": [
             "/api/pc-status",
+            "/api/user-ids/issue",
+            "/api/user-ids/pool",
             "/ws/pc-updates",
         ],
     }
@@ -183,6 +279,66 @@ def root() -> Dict[str, Any]:
 @app.get("/api/pc-status")
 def get_pc_status() -> List[Dict[str, Any]]:
     return load_pc_status_rows()
+
+
+@app.post("/api/user-ids/issue", response_model=UserIdIssueResponse)
+def post_issue_user_id(request: UserIdIssueRequest) -> UserIdIssueResponse:
+    with USER_ID_STATE_LOCK:
+        result = issue_user_id(request.preferred_user_id)
+        save_user_id_state()
+
+    return UserIdIssueResponse(
+        user_id=result["user_id"],
+        strategy=result["strategy"],
+        issued_at=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        source=request.source,
+    )
+
+
+@app.post("/api/user-ids/pool", response_model=UserIdPoolUpdateResponse)
+def post_update_user_id_pool(request: UserIdPoolUpdateRequest) -> UserIdPoolUpdateResponse:
+    incoming: List[str] = []
+    seen: Set[str] = set()
+    invalid_ids: List[str] = []
+    for raw in request.user_ids:
+        user_id = clean_user_id(raw)
+        if not user_id:
+            invalid_ids.append(str(raw))
+            continue
+        if user_id in seen:
+            continue
+        seen.add(user_id)
+        incoming.append(user_id)
+
+    if invalid_ids:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "All user_ids must be exactly 10 digits",
+                "invalid_user_ids": invalid_ids,
+            },
+        )
+
+    with USER_ID_STATE_LOCK:
+        if request.replace:
+            USER_ID_STATE["pool"] = list(incoming)
+        else:
+            existing_pool = USER_ID_STATE.get("pool", [])
+            existing_set = set(existing_pool)
+            for user_id in incoming:
+                if user_id not in existing_set:
+                    existing_pool.append(user_id)
+                    existing_set.add(user_id)
+            USER_ID_STATE["pool"] = existing_pool
+
+        save_user_id_state()
+        pool_size = len(USER_ID_STATE.get("pool", []))
+
+    return UserIdPoolUpdateResponse(
+        pool_size=pool_size,
+        accepted_count=len(incoming),
+        replaced=bool(request.replace),
+    )
 
 
 @app.websocket("/ws/pc-updates")

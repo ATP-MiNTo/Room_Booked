@@ -16,7 +16,8 @@ YOLOv8-based people detection with PC/seat usage logic for both live cameras and
 ## What Is Implemented
 
 - Multi-source person detection (default up to 4 sources)
-- Auto 3-digit person ID assignment and ROI image snapshots
+- Runtime currently uses local person IDs for tracking/ROI snapshots
+- API supports strict external 10-digit user ID issuing (preferred or pool)
 - Seat ROI overlap tracking and dwell-based usage classification
 - Monitor ROI ON/OFF heuristic with stabilization frames
 - PC activity event logs (`USING_PC` / `NON_PC_ACTIVITY`)
@@ -208,8 +209,23 @@ Open API docs:
 
 - `GET /api/pc-status`
     - Current all-PC compact state from `logs/pc_state_all.csv`.
+- `POST /api/user-ids/issue`
+    - Issues one 10-digit user ID.
+    - If `preferred_user_id` is provided, it must be exactly 10 digits and is returned with strategy `preferred`.
+    - If no preferred ID is provided, the API pops from preloaded pool with strategy `pool`.
+    - Returns HTTP `409` when pool is empty and no preferred ID is provided.
+- `POST /api/user-ids/pool`
+    - Preloads or updates the available 10-digit ID pool.
+    - `replace=true` overwrites pool; `replace=false` appends unique valid IDs.
+    - Invalid IDs (not exactly 10 digits) are rejected with HTTP `400`.
 - `WS /ws/pc-updates`
     - Realtime push stream (about once per second) of all-PC status.
+
+ID policy note:
+
+- No automatic fallback ID generation is used.
+- IDs are expected to be supplied by external systems (direct preferred ID or preloaded pool).
+- Issued IDs are persisted to `logs/user_id_state.json` (`pool` and `issued`).
 
 WebSocket note:
 
@@ -289,3 +305,5 @@ Groundtruth files use the same camera label naming convention and should include
 - Keep source labels and ROI filenames aligned.
 - Adjust behavior primarily through `tool/threaded_config.yaml`.
 - Use `tool/groundtruth_labeler.py` to build eval CSVs before running `--eval`.
+- For API-based user IDs, preload pool via `POST /api/user-ids/pool` before calling `POST /api/user-ids/issue`.
+- Current detection runtime is not yet wired to consume `/api/user-ids/issue` automatically.
