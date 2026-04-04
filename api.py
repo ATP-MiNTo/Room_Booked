@@ -361,4 +361,4 @@ async def websocket_pc_updates(websocket: WebSocket):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("api:app", host="10.109.38.231", port=8000, reload=False)

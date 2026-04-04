@@ -13,7 +13,6 @@ pc_unattended_flags_*
 daily_summary_*
 test_vid
 *.mp4
-groundtruth/
 logs_video_mode/Back_left*
 logs_video_mode/Back_right*
 logs_video_mode/Front_left*
