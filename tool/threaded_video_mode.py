@@ -179,6 +179,8 @@ EVAL_TAG = str(CLI_ARGS.eval_tag).strip() or time.strftime("eval_%Y%m%d_%H%M%S",
 GROUNDTRUTH_DIR = os.path.normpath(str(CLI_ARGS.groundtruth_dir))
 EVAL_LOG_ROOT = os.path.normpath(str(CLI_ARGS.eval_log_dir)) if str(CLI_ARGS.eval_log_dir).strip() else os.path.join(LOG_BASE_DIR, "eval")
 MODEL_NAME_FOR_LOG = os.path.basename(MODEL_PATH)
+# Delay seat people-count accumulation until person stays inside the same ROI.
+PEOPLE_COUNT_DWELL_SEC = 2.0
 
 # ----------------------------------------------------------------------------------------------
 
@@ -871,7 +873,7 @@ def flush_eval_active_sessions(cam_data, end_ts):
     active.clear()
 
 
-def compute_eval_metrics_for_rows(rows):
+def compute_eval_metrics_for_rows(rows, sample_interval_sec=EVAL_SAMPLE_SEC):
     scored_rows = [
         row for row in rows
         if row.get("occupied_gt", "") != "" and row.get("people_count_gt", "") != ""
@@ -882,12 +884,17 @@ def compute_eval_metrics_for_rows(rows):
     tp = tn = fp = fn = 0
     people_abs_errors = []
     people_exact_matches = 0
+    occupied_pred_samples = 0
+    occupied_gt_samples = 0
 
     for row in scored_rows:
         pred = int(row.get("occupied_pred", 0))
         gt = int(row.get("occupied_gt", 0))
         pred_people = int(row.get("people_count_pred", 0))
         gt_people = int(row.get("people_count_gt", 0))
+
+        occupied_pred_samples += pred
+        occupied_gt_samples += gt
 
         if pred == 1 and gt == 1:
             tp += 1
@@ -910,6 +917,9 @@ def compute_eval_metrics_for_rows(rows):
     f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
     mae_people_count = (sum(people_abs_errors) / len(people_abs_errors)) if people_abs_errors else 0.0
     match_rate_people_count_exact = (people_exact_matches / len(people_abs_errors)) if people_abs_errors else 0.0
+    occupied_time_pred_sec = float(occupied_pred_samples) * float(sample_interval_sec)
+    occupied_time_gt_sec = float(occupied_gt_samples) * float(sample_interval_sec)
+    occupied_time_abs_error_sec = abs(occupied_time_pred_sec - occupied_time_gt_sec)
 
     return {
         "samples": total,
@@ -923,6 +933,9 @@ def compute_eval_metrics_for_rows(rows):
         "f1": round(f1, 4),
         "mae_people_count": round(mae_people_count, 4),
         "match_rate_people_count_exact": round(match_rate_people_count_exact, 4),
+        "occupied_time_pred_sec": round(occupied_time_pred_sec, 4),
+        "occupied_time_gt_sec": round(occupied_time_gt_sec, 4),
+        "occupied_time_abs_error_sec": round(occupied_time_abs_error_sec, 4),
     }
 
 
@@ -984,7 +997,6 @@ def write_eval_outputs(cams):
                     continue
                 summary_rows.append(
                     {
-                        "eval_tag": EVAL_TAG,
                         "model_name": MODEL_NAME_FOR_LOG,
                         "cam_name": cam_name,
                         "pc_name": pc_name,
@@ -996,7 +1008,6 @@ def write_eval_outputs(cams):
             if cam_metrics is not None:
                 summary_rows.append(
                     {
-                        "eval_tag": EVAL_TAG,
                         "model_name": MODEL_NAME_FOR_LOG,
                         "cam_name": cam_name,
                         "pc_name": "ALL",
@@ -1008,7 +1019,6 @@ def write_eval_outputs(cams):
     if global_metrics is not None:
         summary_rows.append(
             {
-                "eval_tag": EVAL_TAG,
                 "model_name": MODEL_NAME_FOR_LOG,
                 "cam_name": "ALL",
                 "pc_name": "ALL",
@@ -1016,10 +1026,21 @@ def write_eval_outputs(cams):
             }
         )
 
+    summary_rows.sort(
+        key=lambda row: (
+            str(row.get("cam_name", "")) == "ALL",
+            str(row.get("cam_name", "")),
+            str(row.get("pc_name", "")) == "ALL",
+            pc_name_sort_key(row.get("pc_name", "")),
+        )
+    )
+
     summary_path = os.path.join(EVAL_LOG_ROOT, f"eval_summary_{EVAL_TAG}.csv")
     summary_columns = [
-        "eval_tag", "model_name", "cam_name", "pc_name", "samples", "tp", "tn", "fp", "fn",
+        "pc_name", "samples", "tp", "tn", "fp", "fn",
         "accuracy", "precision", "recall", "f1", "mae_people_count", "match_rate_people_count_exact",
+        "occupied_time_pred_sec", "occupied_time_gt_sec", "occupied_time_abs_error_sec",
+        "model_name", "cam_name",
     ]
     pd.DataFrame(summary_rows, columns=summary_columns).to_csv(summary_path, index=False)
 
@@ -1411,12 +1432,10 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                         person_count += 1
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         current_box = (x1, y1, x2, y2)
-                        
+
                         # determine which PC this person is in
                         current_pc = get_pc_for_box(current_box, cam_data["pc_rois"]) if ENABLE_PC_ROI else None
-                        if current_pc:
-                            pc_people_counts[current_pc] = pc_people_counts.get(current_pc, 0) + 1
-                        
+
                         matched_id = match_box_to_person(
                             current_box,
                             cam_data["tracked_persons"],
@@ -1444,7 +1463,8 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                             pdata["last_seen_ts"] = frame_time_sec
                             pdata["missing_since_ts"] = None
                             person_name = pdata.get("name", f"Person {matched_id}")
-                            
+
+                            counted_pc = None
                             # PC dwell-time tracking
                             if current_pc:
                                 if pdata.get("current_pc") == current_pc:
@@ -1454,9 +1474,11 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                                     # entered new PC, start timer
                                     pdata["current_pc"] = current_pc
                                     pdata["pc_enter_time"] = frame_time_sec
-                                
+
                                 # check if threshold met
                                 dwell_time = frame_time_sec - pdata.get("pc_enter_time", frame_time_sec)
+                                if dwell_time >= PEOPLE_COUNT_DWELL_SEC:
+                                    counted_pc = current_pc
                                 if dwell_time >= PERSON_OVERLAP_DWELL_SEC:
                                     pc_state = cam_data.get("pc_states", {}).get(current_pc, {})
                                     if pc_state.get("pc_on"):
@@ -1468,7 +1490,10 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                                 pdata["current_pc"] = None
                                 pdata["pc_enter_time"] = None
                                 pdata["assigned_pc"] = None
-                            
+
+                            if counted_pc:
+                                pc_people_counts[counted_pc] = pc_people_counts.get(counted_pc, 0) + 1
+
                             current_time = frame_time_sec
                             last_save = pdata.get("last_save", 0)
                             if person_name != f"Person {matched_id}" and current_time - last_save >= SAVE_INTERVAL_SEC:
