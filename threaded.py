@@ -177,6 +177,61 @@ except Exception:
     # ignore if attribute not present
     pass
 
+
+# Shared YOLO model is used by multiple camera threads.
+# Serialize inference calls to avoid thread-race behavior in ultralytics/torch runtime.
+INFERENCE_LOCK = threading.Lock()
+
+
+def resolve_person_class_ids(yolo_model):
+    """Return class ids that represent person/human for current model labels."""
+    try:
+        names = getattr(yolo_model, "names", None)
+        if isinstance(names, dict):
+            person_ids = {
+                int(class_id)
+                for class_id, class_name in names.items()
+                if "person" in str(class_name).strip().lower()
+                or "human" in str(class_name).strip().lower()
+            }
+            if person_ids:
+                return person_ids
+        elif isinstance(names, (list, tuple)):
+            person_ids = {
+                idx
+                for idx, class_name in enumerate(names)
+                if "person" in str(class_name).strip().lower()
+                or "human" in str(class_name).strip().lower()
+            }
+            if person_ids:
+                return person_ids
+    except Exception:
+        pass
+
+    # Fallback for standard COCO-style models.
+    return {0}
+
+
+PERSON_CLASS_IDS = resolve_person_class_ids(model)
+print(f"Person class ids: {sorted(PERSON_CLASS_IDS)}")
+
+
+def run_model_inference(frame):
+    """Run one inference pass with safe fallback paths and serialized model access."""
+    with INFERENCE_LOCK:
+        try:
+            if device.startswith("cuda") and cuda_available:
+                from torch import amp
+
+                with amp.autocast(device_type="cuda"):
+                    return model(frame, verbose=False, device=device)
+            return model(frame, verbose=False, device=device)
+        except Exception:
+            try:
+                return model(frame, verbose=False)
+            except Exception:
+                raise
+
 def to_safe_label(value):
     """Convert a display label into a filesystem-safe name."""
     cleaned = "".join((c if c.isalnum() or c in ("-", "_") else "_") for c in str(value).strip())
@@ -915,21 +970,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
             if do_infer:
                 # run inference (use AMP autocast if CUDA available)
                 inf_start = time.time()
-                try:
-                    try:
-                        if device.startswith("cuda") and cuda_available:
-                            from torch import amp
-                            with amp.autocast(device_type="cuda"):
-                                results = model(frame, verbose=False, device=device)
-                        else:
-                            results = model(frame, verbose=False, device=device)
-                    except Exception:
-                        try:
-                            results = model(frame, verbose=False)
-                        except Exception:
-                            raise
-                except Exception:
-                    results = model(frame, verbose=False)
+                results = run_model_inference(frame)
                 inf_end = time.time()
                 cam_data["inference_runs"] += 1
                 cam_data["total_inference_time_ms"] += (inf_end - inf_start) * 1000.0
@@ -943,7 +984,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 for box in results[0].boxes:
                     cls = int(box.cls[0])
                     conf = float(box.conf[0])
-                    if cls == 0 and conf > CONF_THRESHOLD:
+                    if cls in PERSON_CLASS_IDS and conf > CONF_THRESHOLD:
                         person_count += 1
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         current_box = (x1, y1, x2, y2)
