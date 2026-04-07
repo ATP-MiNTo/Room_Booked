@@ -76,6 +76,7 @@ def parse_cli_args():
         help="Eval output root directory (default: <VIDEO_LOG_BASE_DIR>/eval)",
     )
     parser.add_argument("--video-input-dir", default="", help="Override VIDEO_INPUT_DIR for this run")
+    parser.add_argument("--eval-only", dest="eval_only", action="store_true", help="Re-evaluate existing eval outputs using duration-based metrics (no video processing)")
     args, _ = parser.parse_known_args()
     return args
 
@@ -181,6 +182,8 @@ EVAL_LOG_ROOT = os.path.normpath(str(CLI_ARGS.eval_log_dir)) if str(CLI_ARGS.eva
 MODEL_NAME_FOR_LOG = os.path.basename(MODEL_PATH)
 # Delay seat people-count accumulation until person stays inside the same ROI.
 PEOPLE_COUNT_DWELL_SEC = 2.0
+# Avoid showing hold box for a single-frame miss.
+HOLD_VISUAL_MIN_SEC = max(0.0, float(_require_config_value(CONFIG, "HOLD_VISUAL_MIN_SEC")))
 
 # ----------------------------------------------------------------------------------------------
 
@@ -223,6 +226,61 @@ try:
 except Exception:
     # ignore if attribute not present
     pass
+
+
+# Shared YOLO model is used by multiple camera threads.
+# Serialize inference calls to avoid thread-race behavior in ultralytics/torch runtime.
+INFERENCE_LOCK = threading.Lock()
+
+
+def resolve_person_class_ids(yolo_model):
+    """Return class ids that represent person/human for current model labels."""
+    try:
+        names = getattr(yolo_model, "names", None)
+        if isinstance(names, dict):
+            person_ids = {
+                int(class_id)
+                for class_id, class_name in names.items()
+                if "person" in str(class_name).strip().lower()
+                or "human" in str(class_name).strip().lower()
+            }
+            if person_ids:
+                return person_ids
+        elif isinstance(names, (list, tuple)):
+            person_ids = {
+                idx
+                for idx, class_name in enumerate(names)
+                if "person" in str(class_name).strip().lower()
+                or "human" in str(class_name).strip().lower()
+            }
+            if person_ids:
+                return person_ids
+    except Exception:
+        pass
+
+    # Fallback for standard COCO-style models.
+    return {0}
+
+
+PERSON_CLASS_IDS = resolve_person_class_ids(model)
+print(f"Person class ids: {sorted(PERSON_CLASS_IDS)}")
+
+
+def run_model_inference(frame):
+    """Run one inference pass with safe fallback paths and serialized model access."""
+    with INFERENCE_LOCK:
+        try:
+            if device.startswith("cuda") and cuda_available:
+                from torch import amp
+
+                with amp.autocast(device_type="cuda"):
+                    return model(frame, verbose=False, device=device)
+            return model(frame, verbose=False, device=device)
+        except Exception:
+            try:
+                return model(frame, verbose=False)
+            except Exception:
+                raise
 
 def to_safe_label(value):
     """Convert a display label into a filesystem-safe name."""
@@ -795,6 +853,38 @@ def update_eval_sessions(cam_data, pc_name, current_person_id, now_ts):
         active.pop(pc_name, None)
 
 
+def collect_detection_rows(cam_idx, cam_data, sample_ts):
+    sample_time_text = format_video_timestamp(sample_ts)
+    sample_clock = format_video_clock(sample_ts)
+    pc_states = cam_data.get("pc_states", {})
+    pc_people_counts = cam_data.get("last_pc_people_counts", {})
+    source_video = os.path.basename(str(cam_data.get("source_path", "")))
+
+    for pc_name in sorted(pc_states.keys(), key=pc_name_sort_key):
+        state = pc_states.get(pc_name, {})
+        pred_occupied = 1 if bool(state.get("person_present")) else 0
+        pred_people_count = int(pc_people_counts.get(pc_name, 0))
+        current_person_id = state.get("current_person_id")
+        current_person_text = str(current_person_id) if current_person_id else ""
+
+        cam_data.setdefault("detection_detail_rows", []).append(
+            {
+                "run_tag": EVAL_TAG,
+                "model_name": MODEL_NAME_FOR_LOG,
+                "source_video": source_video,
+                "time": sample_time_text,
+                "clock": sample_clock,
+                "t_sec": round(float(sample_ts), 2),
+                "cam_idx": cam_idx,
+                "cam_name": cam_data.get("name", ""),
+                "pc_name": pc_name,
+                "occupied_pred": pred_occupied,
+                "people_count_pred": pred_people_count,
+                "current_person_ids_pred": current_person_text,
+            }
+        )
+
+
 def collect_eval_rows(cam_idx, cam_data, sample_ts):
     if not EVAL_MODE:
         return
@@ -849,6 +939,25 @@ def collect_eval_rows(cam_idx, cam_data, sample_ts):
         )
 
         update_eval_sessions(cam_data, pc_name, current_person_id, sample_ts)
+
+
+def write_detection_outputs(cams):
+    os.makedirs(EVAL_LOG_ROOT, exist_ok=True)
+    for cam_idx, cam_data in cams.items():
+        cam_label = cam_data.get("label", to_safe_label(cam_data.get("name", f"cam{cam_idx}")))
+        cam_name = cam_data.get("name", cam_label)
+        cam_eval_dir = os.path.join(EVAL_LOG_ROOT, cam_label)
+        os.makedirs(cam_eval_dir, exist_ok=True)
+
+        detail_rows = cam_data.get("detection_detail_rows", [])
+        detail_path = os.path.join(cam_eval_dir, f"detection_detail_{cam_label}_{EVAL_TAG}.csv")
+        detail_columns = [
+            "run_tag", "model_name", "source_video", "time", "clock", "t_sec", "cam_idx", "cam_name",
+            "pc_name", "occupied_pred", "people_count_pred", "current_person_ids_pred",
+        ]
+        pd.DataFrame(detail_rows, columns=detail_columns).to_csv(detail_path, index=False)
+
+        print(f"Detection snapshot CSV saved to {detail_path}")
 
 
 def flush_eval_active_sessions(cam_data, end_ts):
@@ -937,6 +1046,201 @@ def compute_eval_metrics_for_rows(rows, sample_interval_sec=EVAL_SAMPLE_SEC):
         "occupied_time_gt_sec": round(occupied_time_gt_sec, 4),
         "occupied_time_abs_error_sec": round(occupied_time_abs_error_sec, 4),
     }
+
+
+def build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0):
+    """
+    Build continuous occupancy intervals from per-second detail samples.
+    Filters for given pc_name and groups consecutive occupied_pred=1 samples.
+    Debounce: ignore bursts shorter than debounce_sec.
+    Returns list of (start_ts, end_ts) tuples in seconds.
+    """
+    pc_rows = [r for r in detail_rows if r.get("pc_name") == pc_name]
+    if not pc_rows:
+        return []
+    
+    # Sort by t_sec
+    pc_rows_sorted = sorted(pc_rows, key=lambda r: float(r.get("t_sec", 0)))
+    
+    intervals = []
+    in_interval = False
+    interval_start = None
+    last_occupied = None
+    
+    for row in pc_rows_sorted:
+        occupied_pred = int(row.get("occupied_pred", 0))
+        t_sec = float(row.get("t_sec", 0))
+        
+        if occupied_pred == 1:
+            if not in_interval:
+                interval_start = t_sec
+                in_interval = True
+            last_occupied = t_sec
+        else:
+            if in_interval and last_occupied is not None:
+                duration = last_occupied - interval_start
+                if duration >= debounce_sec:
+                    intervals.append((interval_start, last_occupied + 1.0))  # +1 to include end second
+                in_interval = False
+                last_occupied = None
+    
+    # Close any open interval at end
+    if in_interval and last_occupied is not None:
+        duration = last_occupied - interval_start
+        if duration >= debounce_sec:
+            intervals.append((interval_start, last_occupied + 1.0))
+    
+    return sorted(intervals)
+
+
+def build_gt_occupancy_intervals(gt_lookup, pc_name, video_end_ts=None):
+    """
+    Build continuous occupancy intervals from sparse GT snapshots using forward-fill.
+    Consecutive occupied samples are merged into one interval, matching see_roi_conf.py.
+    Returns list of (start_ts, end_ts) tuples in seconds.
+    """
+    if not gt_lookup or not pc_name:
+        return []
+    
+    # Get all GT rows for this PC, sorted by time
+    gt_rows = [(time_text, gt_info) for (time_text, pc), gt_info in gt_lookup.items() if pc == pc_name]
+    if not gt_rows:
+        return []
+    
+    try:
+        gt_rows_sorted = sorted(gt_rows, key=lambda x: time.mktime(time.strptime(x[0], "%Y-%m-%d %H:%M:%S")))
+    except Exception:
+        return []
+    
+    timeline = {}
+    for time_text, gt_info in gt_rows_sorted:
+        try:
+            ts = time.mktime(time.strptime(time_text, "%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            continue
+        timeline[ts] = 1 if int(gt_info.get("occupied_gt", 0)) > 0 else 0
+
+    points = sorted(timeline.items(), key=lambda item: item[0])
+    if not points:
+        return []
+
+    intervals = []
+    in_interval = False
+    interval_start = None
+
+    for i, (cur_sec, cur_occupied) in enumerate(points[:-1]):
+        next_sec, next_occupied = points[i + 1]
+
+        if cur_occupied == 1 and not in_interval:
+            interval_start = cur_sec
+            in_interval = True
+
+        if in_interval and next_occupied == 0:
+            intervals.append((interval_start, next_sec))
+            in_interval = False
+            interval_start = None
+
+    last_sec, last_occupied = points[-1]
+    if last_occupied == 1:
+        if not in_interval:
+            interval_start = last_sec
+        tail_end = video_end_ts if video_end_ts else (last_sec + 900)
+        intervals.append((interval_start, tail_end))
+    
+    return sorted(intervals)
+
+
+def compute_interval_overlap_sec(interval1, interval2):
+    """Compute overlap in seconds between two (start, end) intervals."""
+    start = max(interval1[0], interval2[0])
+    end = min(interval1[1], interval2[1])
+    return max(0, end - start)
+
+
+def compute_duration_metrics(detail_rows, gt_lookup, pc_name, video_end_ts=None):
+    """
+    Compute seat-time efficiency metrics: coverage, duration error, missed sessions.
+    detail_rows: list of eval detail dicts with occupied_pred
+    gt_lookup: dict (time_text, pc_name) -> {occupied_gt, people_count_gt, ...}
+    pc_name: PC to evaluate
+    video_end_ts: unix timestamp of video end (for GT interval closure)
+    """
+    pred_intervals = build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0)
+    gt_intervals = build_gt_occupancy_intervals(gt_lookup, pc_name, video_end_ts)
+    
+    if not gt_intervals:
+        return None
+    
+    # Compute GT total occupied time
+    gt_total_sec = sum(end - start for start, end in gt_intervals)
+    
+    # Compute predicted total occupied time
+    pred_total_sec = sum(end - start for start, end in pred_intervals)
+    
+    # Compute coverage: overlap / gt_total
+    total_overlap_sec = 0
+    for pred_interval in pred_intervals:
+        for gt_interval in gt_intervals:
+            total_overlap_sec += compute_interval_overlap_sec(pred_interval, gt_interval)
+    
+    coverage = total_overlap_sec / gt_total_sec if gt_total_sec > 0 else 0.0
+    
+    # Duration error
+    duration_error_sec = abs(pred_total_sec - gt_total_sec)
+    duration_error_ratio = duration_error_sec / gt_total_sec if gt_total_sec > 0 else 0.0
+    accuracy_percent = coverage * 100.0
+    
+    # Over-occupancy: predicted but not in GT
+    over_occupancy_sec = pred_total_sec - total_overlap_sec
+    
+    # Missed occupancy: GT but not predicted
+    missed_occupancy_sec = gt_total_sec - total_overlap_sec
+    
+    return {
+        "gt_occupied_sec": round(gt_total_sec, 2),
+        "pred_occupied_sec": round(pred_total_sec, 2),
+        "overlap_sec": round(total_overlap_sec, 2),
+        "coverage": round(coverage, 4),
+        "accuracy_percent": round(accuracy_percent, 2),
+        "duration_error_sec": round(duration_error_sec, 2),
+        "duration_error_ratio": round(duration_error_ratio, 4),
+        "over_occupancy_sec": round(over_occupancy_sec, 2),
+        "missed_occupancy_sec": round(missed_occupancy_sec, 2),
+        "gt_intervals": len(gt_intervals),
+        "pred_intervals": len(pred_intervals),
+    }
+
+
+def run_eval_only_mode(eval_log_root, groundtruth_dir):
+    """
+    Re-evaluate existing eval outputs using duration-based metrics.
+    This delegates to the standalone duration evaluator so eval-only and the
+    standalone tool share the same CSV discovery and summary output.
+    """
+    print("\n=== Eval-Only Mode (Duration-Based Metrics) ===")
+    print(f"Eval log root: {eval_log_root}")
+    print(f"Groundtruth dir: {groundtruth_dir}")
+
+    try:
+        import importlib.util
+
+        module_path = os.path.join(os.path.dirname(__file__), "eval_duration_based.py")
+        spec = importlib.util.spec_from_file_location("eval_duration_based", module_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Unable to load evaluator from {module_path}")
+
+        evaluator_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(evaluator_module)
+        run_eval_only_duration = evaluator_module.run_eval_only_duration
+
+        success = run_eval_only_duration(eval_log_root, groundtruth_dir)
+        if success:
+            print("Eval-only duration summary completed.")
+        return
+    except Exception as e:
+        print(f"Failed to run shared duration evaluator: {e}")
+
+    print("No metrics computed.")
 
 
 def write_eval_outputs(cams):
@@ -1037,10 +1341,10 @@ def write_eval_outputs(cams):
 
     summary_path = os.path.join(EVAL_LOG_ROOT, f"eval_summary_{EVAL_TAG}.csv")
     summary_columns = [
-        "pc_name", "samples", "tp", "tn", "fp", "fn",
+        "pc_name", "cam_name", "samples", "tp", "tn", "fp", "fn",
         "accuracy", "precision", "recall", "f1", "mae_people_count", "match_rate_people_count_exact",
         "occupied_time_pred_sec", "occupied_time_gt_sec", "occupied_time_abs_error_sec",
-        "model_name", "cam_name",
+        "model_name",
     ]
     pd.DataFrame(summary_rows, columns=summary_columns).to_csv(summary_path, index=False)
 
@@ -1309,9 +1613,10 @@ def build_camera_states():
             "last_pc_people_counts": {},
             "eval_groundtruth": eval_groundtruth,
             "eval_detail_rows": [],
+            "detection_detail_rows": [],
             "eval_user_sessions": [],
             "eval_active_sessions": {},
-            "next_eval_sample_ts": 0.0,
+            "next_detection_sample_ts": 0.0,
         }
         os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
         os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
@@ -1399,21 +1704,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
             if do_infer:
                 # run inference (use AMP autocast if CUDA available)
                 inf_start = time.time()
-                try:
-                    try:
-                        if device.startswith("cuda") and cuda_available:
-                            from torch import amp
-                            with amp.autocast(device_type="cuda"):
-                                results = model(frame, verbose=False, device=device)
-                        else:
-                            results = model(frame, verbose=False, device=device)
-                    except Exception:
-                        try:
-                            results = model(frame, verbose=False)
-                        except Exception:
-                            raise
-                except Exception:
-                    results = model(frame, verbose=False)
+                results = run_model_inference(frame)
                 inf_end = time.time()
                 cam_data["inference_runs"] += 1
                 cam_data["total_inference_time_ms"] += (inf_end - inf_start) * 1000.0
@@ -1428,7 +1719,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 for box in results[0].boxes:
                     cls = int(box.cls[0])
                     conf = float(box.conf[0])
-                    if cls == 0 and conf > CONF_THRESHOLD:
+                    if cls in PERSON_CLASS_IDS and conf > CONF_THRESHOLD:
                         person_count += 1
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         current_box = (x1, y1, x2, y2)
@@ -1554,7 +1845,26 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     if pdata.get("missing_since_ts") is None:
                         pdata["missing_since_ts"] = frame_time_sec
 
+                    # Keep a short visual hold during brief detection dropouts.
+                    last_box = pdata.get("last_box")
+                    if last_box:
+                        missing_sec = max(0.0, frame_time_sec - float(pdata.get("last_seen_ts", frame_time_sec)))
+                        if HOLD_VISUAL_MIN_SEC <= missing_sec <= TRACK_MAX_MISSING_SEC:
+                            x1, y1, x2, y2 = map(int, last_box)
+                            hold_color = (0, 165, 255)
+                            hold_name = str(pdata.get("name", f"Person {pid}"))
+                            hold_label = f"ID:{hold_name} hold:{missing_sec:.1f}s"
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), hold_color, 2)
+                            cv2.putText(frame, hold_label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, hold_color, 2)
+
                 prune_stale_tracks(cam_data["tracked_persons"], frame_time_sec)
+
+                # Use active tracks for displayed people count so brief misses do not flicker to zero.
+                person_count = sum(
+                    1
+                    for pdata in cam_data["tracked_persons"].values()
+                    if max(0.0, frame_time_sec - float(pdata.get("last_seen_ts", frame_time_sec))) <= TRACK_MAX_MISSING_SEC
+                )
 
                 pc_to_person_map = {pc_name: data[1] for pc_name, data in pc_to_person.items()}
                 cam_data["last_pc_people_counts"] = pc_people_counts
@@ -1592,14 +1902,15 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
             else:
                 update_smoothed_person_count(cam_data, 0, frame_time_sec)
 
-            if EVAL_MODE:
-                next_sample_ts = float(cam_data.get("next_eval_sample_ts", 0.0))
-                if next_sample_ts <= 0.0:
-                    next_sample_ts = float(frame_time_sec)
-                while frame_time_sec >= next_sample_ts:
+            next_sample_ts = float(cam_data.get("next_detection_sample_ts", 0.0))
+            if next_sample_ts <= 0.0:
+                next_sample_ts = float(frame_time_sec)
+            while frame_time_sec >= next_sample_ts:
+                collect_detection_rows(cam_idx, cam_data, next_sample_ts)
+                if EVAL_MODE:
                     collect_eval_rows(cam_idx, cam_data, next_sample_ts)
-                    next_sample_ts += EVAL_SAMPLE_SEC
-                cam_data["next_eval_sample_ts"] = next_sample_ts
+                next_sample_ts += EVAL_SAMPLE_SEC
+            cam_data["next_detection_sample_ts"] = next_sample_ts
 
             frame_end = time.time()
             latency_ms = (frame_end - loop_wall_start) * 1000.0
@@ -1711,6 +2022,7 @@ def stop_resource_monitor_if_enabled(monitor_stop, monitor_thread):
 
 def save_session_outputs(cams, run_start_day_tag, pc_state_all_csv):
     all_unattended_logs = []
+    write_detection_outputs(cams)
     for cam_idx, cam_data in cams.items():
         source_name = os.path.splitext(os.path.basename(str(cam_data.get("source_path") or "")))[0]
         safe_name = cam_data.get("label") or to_safe_label(source_name) or to_safe_label(cam_data.get("name", "video"))
@@ -1854,6 +2166,13 @@ def save_session_outputs(cams, run_start_day_tag, pc_state_all_csv):
 
 
 def main():
+    # Check for eval-only mode
+    if CLI_ARGS.eval_only:
+        eval_log_root = os.path.normpath(str(CLI_ARGS.eval_log_dir)) if str(CLI_ARGS.eval_log_dir).strip() else os.path.join(VIDEO_LOG_BASE_DIR, "eval")
+        groundtruth_dir = os.path.normpath(str(CLI_ARGS.groundtruth_dir))
+        run_eval_only_mode(eval_log_root, groundtruth_dir)
+        return
+    
     cams = build_camera_states()
     monitor_stop, monitor_thread = start_resource_monitor_if_enabled(cams)
     print_session_banner(cams)
