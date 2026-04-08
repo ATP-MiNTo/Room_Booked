@@ -32,6 +32,10 @@ YOLOv8-based people detection with PC/seat usage logic for both live cameras and
 - Smoothed PC availability state (same mode-window idea)
 - Detection schedule gating (live mode)
 - Session performance summary logging
+- Row zone reconciliation (raw vs reconciled people count)
+- Per-row flow summaries (`row_flow_summary_*.csv`)
+- Simplified eval summary schema with occupied/count accuracy percent
+- Unified ROI setup/view-edit tooling (`tool/roi_setup.py`, `tool/roi_conf.py`)
 
 ---
 
@@ -51,10 +55,8 @@ Room_Booked/
     ├── threaded_config.yaml
     ├── requirements.txt
     ├── install_deps.py
-    ├── roi_pcseat_setup.py
-    ├── roi_monitor_setup.py
-    ├── roi_edit_setup.py
-    ├── see_roi_conf.py
+    ├── roi_setup.py
+    ├── roi_conf.py
     └── roi_config/
 ```
 
@@ -93,11 +95,14 @@ python tool\install_deps.py
 ### 3) Configure ROIs
 
 ```powershell
-python tool\roi_pcseat_setup.py
-python tool\roi_monitor_setup.py
-python tool\roi_edit_setup.py
-python tool\see_roi_conf.py
+python tool\roi_setup.py
+python tool\roi_conf.py
 ```
+
+Notes:
+
+- In `tool/roi_setup.py`, set `SETUP_MODE` to one of: `seat`, `monitor`, `row_zone`.
+- In `tool/roi_conf.py`, set `MODE` to `edit` or `view`.
 
 ### 4) Label groundtruth for eval
 
@@ -173,7 +178,10 @@ Eval mode loads groundtruth from `tool\groundtruth\{CameraLabel}_gt.csv` and wri
 
 - per-camera detailed eval logs
 - per-camera user-seat session intervals
-- eval summary CSV with per-seat accuracy, precision, recall, F1, and count error
+- eval summary CSV with simplified columns:
+    - `pc_name`, `cam_name`, `model_name`
+    - `gt_occupied_sec`, `pred_occupied_sec`
+    - `occupied_accuracy_percent`, `count_accuracy_percent`
 
 Optional eval arguments:
 
@@ -276,6 +284,7 @@ Naming:
 
 - Seat ROI: `{CameraOrSourceLabel}_roi.csv`
 - Monitor ROI: `{CameraOrSourceLabel}_monitor_roi.csv`
+- Row zone ROI: `{CameraOrSourceLabel}_row_zone_roi.csv`
 
 CSV format:
 
@@ -307,3 +316,97 @@ Groundtruth files use the same camera label naming convention and should include
 - Use `tool/groundtruth_labeler.py` to build eval CSVs before running `--eval`.
 - For API-based user IDs, preload pool via `POST /api/user-ids/pool` before calling `POST /api/user-ids/issue`.
 - Current detection runtime is not yet wired to consume `/api/user-ids/issue` automatically.
+
+---
+
+## Implementation Summary (Merged Notes)
+
+### Eval Summary CSV Schema (Simplified)
+
+- Removed columns:
+    - `overlap_sec`, `coverage`, `duration_error_sec`, `duration_error_ratio`
+    - `over_occupancy_sec`, `missed_occupancy_sec`, `gt_intervals`, `pred_intervals`
+- Retained columns:
+    - `pc_name`, `cam_name`, `model_name`
+    - `gt_occupied_sec`, `pred_occupied_sec`
+    - `occupied_accuracy_percent` (coverage * 100)
+    - `count_accuracy_percent` (people count accuracy)
+- Summary location:
+    - `logs_video_mode/eval/eval_summary_duration_based.csv`
+
+### Row Zone Reconciliation Logic
+
+Added in `tool/threaded_video_mode.py` with config keys in `tool/threaded_config.yaml`:
+
+```yaml
+ROW_ZONE_CSV_SUFFIX: _row_zone_roi.csv
+ENABLE_ROW_RECONCILIATION: true
+ROW_RELINK_MAX_MISSING_SEC: 3.0
+ROW_SUDDEN_APPEAR_WINDOW_SEC: 4.0
+```
+
+Behavior:
+
+- Row-based enter/exit tracking
+- Re-linking short occlusions in same row (`<= ROW_RELINK_MAX_MISSING_SEC`)
+- Sudden appearance correction when observed row count exceeds flow balance
+- Raw and reconciled counts tracked in parallel
+- Per-row flow report output: `row_flow_summary_*.csv`
+
+### Detection Pipeline Integration
+
+`camera_thread_fn` now:
+
+- Loads row-zone ROIs when reconciliation is enabled
+- Tracks row membership transitions per person
+- Applies occlusion re-link and sudden-appearance correction
+- Displays `Raw/Reconciled: X/Y` on screen when enabled
+
+`collect_detection_rows` now includes:
+
+- `raw_people_count_pred`
+- `reconciled_people_count_pred`
+
+### How To Use Row Reconciliation
+
+1. Define row zones:
+
+```powershell
+python tool\roi_setup.py
+```
+
+Set `SETUP_MODE = "row_zone"` in `tool/roi_setup.py`, then click 4 points per camera.
+
+2. Enable reconciliation in `tool/threaded_config.yaml`:
+
+```yaml
+ENABLE_ROW_RECONCILIATION: true
+```
+
+3. Run video mode:
+
+```powershell
+python tool\threaded_video_mode.py --eval-only
+```
+
+### Output Files Added/Updated
+
+- Per-camera row flow summary:
+    - `logs_video_mode/<CAM_NAME>/row_flow_summary_<safe_cam_name>.csv`
+    - Columns include:
+        - `cam_name`, `row_name`, `enter_count_raw`, `exit_count_raw`
+        - `sudden_appear_count`, `reconcile_enter_adjust`
+        - `enter_count_reconciled`, `exit_count_reconciled`
+        - `row_balance_reconciled`, `raw_count_now`, `reconciled_count_now`
+
+- Updated eval summary:
+    - `logs_video_mode/eval/eval_summary_duration_based.csv`
+
+### Configuration Parameters
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `ENABLE_ROW_RECONCILIATION` | `true` | Enable row zone tracking |
+| `ROW_ZONE_CSV_SUFFIX` | `_row_zone_roi.csv` | File suffix for row ROI CSVs |
+| `ROW_RELINK_MAX_MISSING_SEC` | `3.0` | Max occlusion duration to treat as continuous |
+| `ROW_SUDDEN_APPEAR_WINDOW_SEC` | `4.0` | Window for sudden appearance correction |
