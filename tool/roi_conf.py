@@ -20,7 +20,20 @@ import pandas as pd
 
 # ===== MODE SELECTOR (hardcoded at top) =====
 # Choose "edit" for interactive ROI polygon editing, or "view" for visualization
-MODE = "edit"
+MODE = "view"
+
+# Source mode:
+# - "camera": read from physical cameras using CAM_INDEXES
+# - "video": read from video files resolved by camera name
+SOURCE_MODE = "video"
+
+# Used when SOURCE_MODE == "video"
+VIDEO_INPUT_DIR = "test_vid"
+VIDEO_EXTENSIONS = [".mp4", ".avi", ".mov", ".mkv", ".m4v"]
+VIDEO_SOURCE_OVERRIDES = {
+    # "Front_right": "test_vid/Front_right.mp4",
+}
+VIDEO_USE_SINGLE_FRAME = True
 
 # ===== Camera Configuration =====
 CAM_INDEXES = [0, 1, 2, 3]
@@ -46,6 +59,7 @@ GROUNDTRUTH_DIR = os.path.join("tool", "groundtruth")
 
 SEAT_CSV_SUFFIX = "_roi.csv"
 MONITOR_CSV_SUFFIX = "_monitor_roi.csv"
+ROW_ZONE_CSV_SUFFIX = "_row_zone_roi.csv"
 GT_CSV_SUFFIX = "_gt.csv"
 REQUIRED_POINTS_PER_ROI = 4
 
@@ -58,6 +72,10 @@ SELECTED_COLOR = (0, 255, 255)
 DRAFT_COLOR = (0, 200, 255)
 SEAT_POLY_COLOR = (0, 255, 0)
 MONITOR_POLY_COLOR = (255, 0, 255)
+SEAT_LABEL_SEAT_COLOR = (255, 255, 0)   # cyan
+SEAT_LABEL_PC_COLOR = (0, 255, 0)       # green
+SEAT_LABEL_ZONE_COLOR = (0, 0, 255)     # red
+SEAT_LABEL_GT_COLOR = (0, 0, 255)       # red
 
 WINDOW_NAME = "ROI Configuration Tool"
 
@@ -101,6 +119,29 @@ def get_roi_csv_path(cam_name, mode):
     """Get ROI CSV path for given camera and mode."""
     cam_label = to_safe_label(cam_name)
     return os.path.join(ROI_CONFIG_DIR, f"{cam_label}{get_csv_suffix(mode)}")
+
+
+def resolve_video_path(cam_name):
+    """Resolve video path for a camera label in video source mode."""
+    override_path = VIDEO_SOURCE_OVERRIDES.get(cam_name)
+    if override_path and os.path.exists(override_path):
+        return override_path
+
+    safe_name = to_safe_label(cam_name)
+    candidates = [
+        cam_name,
+        safe_name,
+        cam_name.lower(),
+        safe_name.lower(),
+    ]
+
+    for name in candidates:
+        for ext in VIDEO_EXTENSIONS:
+            path = os.path.join(VIDEO_INPUT_DIR, f"{name}{ext}")
+            if os.path.exists(path):
+                return path
+
+    return None
 
 
 def load_rows_from_csv(csv_path):
@@ -213,26 +254,39 @@ def save_camera_rows(cam_name, mode, rows):
     return csv_path
 
 
-def open_camera(cam_idx_or_name):
-    """Open camera by index or name."""
+def open_input_source(cam_idx_or_name, source_mode):
+    """Open input source as camera or video and return (capture, source_label)."""
+    mode = str(source_mode).strip().lower()
+    cam_name = None
+    cam_idx = 0
+
     if isinstance(cam_idx_or_name, str):
+        cam_name = cam_idx_or_name
         cam_idx = CAM_NAME_TO_INDEX.get(cam_idx_or_name, 0)
     else:
         cam_idx = cam_idx_or_name
-    
+        cam_name = CAM_NAMES.get(cam_idx, f"Cam_{cam_idx}")
+
+    if mode == "video":
+        video_path = resolve_video_path(cam_name)
+        if not video_path:
+            return None, None
+        cap = cv2.VideoCapture(video_path)
+        return cap, video_path
+
     cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
     if not cap.isOpened():
         cap = cv2.VideoCapture(cam_idx)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-    return cap
+    return cap, f"camera:{cam_idx}"
 
 
 def draw_no_camera_screen(cam_name):
-    """Draw placeholder screen when camera is not available."""
+    """Draw placeholder screen when input source is not available."""
     canvas = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
-    cv2.putText(canvas, f"Camera: {cam_name}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, TITLE_COLOR, 2)
-    cv2.putText(canvas, "Camera cannot be opened.", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.8, TEXT_COLOR, 2)
+    cv2.putText(canvas, f"Source: {cam_name}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, TITLE_COLOR, 2)
+    cv2.putText(canvas, "Input source cannot be opened.", (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.8, TEXT_COLOR, 2)
     return canvas
 
 
@@ -374,11 +428,74 @@ def discover_groundtruth_summaries():
 def parse_cam_name_and_type(csv_path):
     """Parse camera name and ROI type from CSV path."""
     name = os.path.basename(csv_path)
+    if name.endswith(ROW_ZONE_CSV_SUFFIX):
+        return name[: -len(ROW_ZONE_CSV_SUFFIX)], "row_zone"
     if name.endswith(MONITOR_CSV_SUFFIX):
         return name[: -len(MONITOR_CSV_SUFFIX)], "monitor"
     if name.endswith(SEAT_CSV_SUFFIX):
         return name[: -len(SEAT_CSV_SUFFIX)], "seat"
     return os.path.splitext(name)[0], "unknown"
+
+
+def infer_row_label_for_pc(pc_name, seat_index):
+    """Map each 3 pc seats into one row label (ROW1, ROW2, ...)."""
+    digits = "".join(ch for ch in str(pc_name) if ch.isdigit())
+    if digits:
+        pc_num = int(digits)
+        if pc_num > 0:
+            return f"ROW{((pc_num - 1) // 3) + 1}"
+    return f"ROW{(seat_index // 3) + 1}"
+
+
+def build_pc_to_row_map(seat_rois):
+    mapping = {}
+    for i, roi in enumerate(seat_rois):
+        pc_name = roi.get("pc_name", "").strip()
+        if not pc_name:
+            continue
+        mapping[pc_name] = infer_row_label_for_pc(pc_name, i)
+    return mapping
+
+
+def zone_label_from_row(row_label):
+    text = str(row_label or "").strip().upper()
+    if text.startswith("ROW"):
+        suffix = text[3:]
+        if suffix.isdigit():
+            return f"Zone{int(suffix)}"
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if digits:
+        return f"Zone{int(digits)}"
+    return "Zone?"
+
+
+def format_seat_display(seat_index, pc_name, row_label, gt_seconds):
+    zone_label = zone_label_from_row(row_label)
+    gt_text = "---" if gt_seconds is None else f"{float(gt_seconds):.0f}"
+    return f"Seat{seat_index} | {pc_name} | {zone_label} (gt={gt_text}s)"
+
+
+def seat_display_segments(seat_index, pc_name, row_label, gt_seconds):
+    zone_label = zone_label_from_row(row_label)
+    gt_text = "---" if gt_seconds is None else f"{float(gt_seconds):.0f}"
+    return [
+        (f"Seat{seat_index}", SEAT_LABEL_SEAT_COLOR),
+        (" | ", TEXT_COLOR),
+        (str(pc_name), SEAT_LABEL_PC_COLOR),
+        (" | ", TEXT_COLOR),
+        (zone_label, SEAT_LABEL_ZONE_COLOR),
+        (f" (gt={gt_text}s)", SEAT_LABEL_GT_COLOR),
+    ]
+
+
+def draw_text_segments(canvas, origin, segments, font, scale, thickness):
+    x, y = int(origin[0]), int(origin[1])
+    for text, color in segments:
+        if not text:
+            continue
+        cv2.putText(canvas, text, (x, y), font, scale, color, thickness)
+        (w, _), _ = cv2.getTextSize(text, font, scale, thickness)
+        x += w
 
 
 def load_roi_csv(csv_path):
@@ -403,9 +520,14 @@ def discover_roi_setups():
     """Discover all ROI setups from CSV files."""
     seat_files = sorted(glob.glob(os.path.join(ROI_CONFIG_DIR, f"*{SEAT_CSV_SUFFIX}")))
     monitor_files = sorted(glob.glob(os.path.join(ROI_CONFIG_DIR, f"*{MONITOR_CSV_SUFFIX}")))
+    row_zone_files = sorted(glob.glob(os.path.join(ROI_CONFIG_DIR, f"*{ROW_ZONE_CSV_SUFFIX}")))
 
-    monitor_file_set = set(monitor_files)
-    seat_files = [path for path in seat_files if path not in monitor_file_set]
+    # *_monitor_roi.csv and *_row_zone_roi.csv also match *_roi.csv glob,
+    # so keep only true seat files here.
+    seat_files = [
+        path for path in seat_files
+        if (not path.endswith(MONITOR_CSV_SUFFIX) and not path.endswith(ROW_ZONE_CSV_SUFFIX))
+    ]
 
     setups = {}
 
@@ -417,8 +539,10 @@ def discover_roi_setups():
                 "cam_name": cam_name,
                 "seat_rois": [],
                 "monitor_rois": [],
+                "row_zone_rois": [],
                 "seat_csv": None,
                 "monitor_csv": None,
+                "row_zone_csv": None,
             }
         setups[cam_name]["seat_rois"] = rois
         setups[cam_name]["seat_csv"] = csv_path
@@ -431,11 +555,29 @@ def discover_roi_setups():
                 "cam_name": cam_name,
                 "seat_rois": [],
                 "monitor_rois": [],
+                "row_zone_rois": [],
                 "seat_csv": None,
                 "monitor_csv": None,
+                "row_zone_csv": None,
             }
         setups[cam_name]["monitor_rois"] = rois
         setups[cam_name]["monitor_csv"] = csv_path
+
+    for csv_path in row_zone_files:
+        cam_name, _ = parse_cam_name_and_type(csv_path)
+        rois = load_roi_csv(csv_path)
+        if cam_name not in setups:
+            setups[cam_name] = {
+                "cam_name": cam_name,
+                "seat_rois": [],
+                "monitor_rois": [],
+                "row_zone_rois": [],
+                "seat_csv": None,
+                "monitor_csv": None,
+                "row_zone_csv": None,
+            }
+        setups[cam_name]["row_zone_rois"] = rois
+        setups[cam_name]["row_zone_csv"] = csv_path
 
     gt_summaries = discover_groundtruth_summaries()
     for cam_name, setup in setups.items():
@@ -460,13 +602,15 @@ def draw_overlay(frame, setup, cam_idx, total):
     cam_name = setup["cam_name"]
     seat_rois = setup.get("seat_rois", [])
     monitor_rois = setup.get("monitor_rois", [])
+    row_zone_rois = setup.get("row_zone_rois", [])
     gt_summary = setup.get("gt_summary")
     gt_by_pc = gt_summary.get("by_pc", {}) if gt_summary else {}
+    pc_to_row = build_pc_to_row_map(seat_rois)
 
     cam_index = CAM_NAME_TO_INDEX.get(cam_name, "?")
     header = (
         f"Camera {cam_idx + 1}/{total}: {cam_name} (index {cam_index}) | "
-        f"Seat ROI: {len(seat_rois)} | Monitor ROI: {len(monitor_rois)}"
+        f"Seat ROI: {len(seat_rois)} | Monitor ROI: {len(monitor_rois)} | Row Zone: {len(row_zone_rois)}"
     )
     cv2.putText(canvas, header, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, TITLE_COLOR, 2)
 
@@ -477,30 +621,31 @@ def draw_overlay(frame, setup, cam_idx, total):
         gt_header = f"GT loaded | sample={gt_summary.get('sample_sec', 1.0):.1f}s"
     else:
         gt_header = "GT not found"
-    cv2.putText(canvas, gt_header, (10, 84), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 220, 255), 2)
+    cv2.putText(canvas, gt_header, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, TEXT_COLOR, 2)
 
     y = 112
     if seat_rois:
         cv2.putText(canvas, "Seat ROI (green)", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, SEAT_POLY_COLOR, 2)
         y += 24
-        for roi in seat_rois:
+        for seat_index, roi in enumerate(seat_rois, start=1):
             ordered = normalize_quad(roi["points"])
             poly = np.array(ordered, dtype=np.int32).reshape((-1, 1, 2))
             cv2.polylines(canvas, [poly], True, SEAT_POLY_COLOR, 2)
 
             label_anchor = tuple(ordered[0])
-            cv2.putText(canvas, roi["pc_name"], label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.65, SEAT_POLY_COLOR, 2)
-
-            gt_text = ""
+            row_label = pc_to_row.get(roi["pc_name"], "ROW?")
+            gt_seconds = None
             if roi["pc_name"] in gt_by_pc:
-                sec = float(gt_by_pc[roi["pc_name"]].get("occupied_time_sec", 0.0))
-                gt_text = f" | GT {sec:.0f}s"
-            cv2.putText(canvas, f"{roi['pc_name']}{gt_text}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 255, 200), 1)
+                gt_seconds = float(gt_by_pc[roi["pc_name"]].get("occupied_time_sec", 0.0))
+
+            seat_only_text = f"Seat{seat_index}"
+            cv2.putText(canvas, seat_only_text, label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.6, SEAT_POLY_COLOR, 2)
+
+            segments = seat_display_segments(seat_index, roi["pc_name"], row_label, gt_seconds)
+            draw_text_segments(canvas, (10, y), segments, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             y += 20
 
     if monitor_rois:
-        y += 10
-        cv2.putText(canvas, "Monitor ROI (magenta)", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, MONITOR_POLY_COLOR, 2)
         y += 24
         for roi in monitor_rois:
             ordered = normalize_quad(roi["points"])
@@ -508,12 +653,24 @@ def draw_overlay(frame, setup, cam_idx, total):
             cv2.polylines(canvas, [poly], True, MONITOR_POLY_COLOR, 2)
 
             label_anchor = tuple(ordered[0])
-            cv2.putText(canvas, roi["pc_name"], label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.65, MONITOR_POLY_COLOR, 2)
-
-            cv2.putText(canvas, roi["pc_name"], (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 255), 1)
+            label_text = f"Monitor | {roi['pc_name']}"
+            cv2.putText(canvas, label_text, label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.6, MONITOR_POLY_COLOR, 2)
             y += 20
 
-    if not seat_rois and not monitor_rois:
+    if row_zone_rois:
+        zone_color = (255, 255, 0)
+        y += 24
+        for roi in row_zone_rois:
+            ordered = normalize_quad(roi["points"])
+            poly = np.array(ordered, dtype=np.int32).reshape((-1, 1, 2))
+            cv2.polylines(canvas, [poly], True, zone_color, 2)
+
+            label_anchor = tuple(ordered[0])
+            label_text = f"Zone | {roi['pc_name']}"
+            cv2.putText(canvas, label_text, label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.6, zone_color, 2)
+            y += 20
+
+    if not seat_rois and not monitor_rois and not row_zone_rois:
         cv2.putText(canvas, "No ROI found for this camera.", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.7, TEXT_COLOR, 2)
 
     return canvas
@@ -521,7 +678,7 @@ def draw_overlay(frame, setup, cam_idx, total):
 
 # ===== Main Functions (Mode-Specific) =====
 
-def main_edit():
+def main_edit(source_mode):
     """Interactive ROI polygon editing mode."""
     mode = EDIT_MODE.strip().lower()
     if mode == "moniter":
@@ -578,10 +735,25 @@ def main_edit():
     cv2.namedWindow(WINDOW_NAME)
     cv2.setMouseCallback(WINDOW_NAME, on_mouse)
 
-    cap = open_camera(app_state["cam_order"][app_state["active_cam_pos"]])
+    cap, source_label = open_input_source(app_state["cam_order"][app_state["active_cam_pos"]], source_mode)
+    if cap is None:
+        print("Unable to open first input source.")
+        return
+
+    frozen_frame = None
+    if source_mode == "video" and VIDEO_USE_SINGLE_FRAME:
+        ret, first_frame = cap.read()
+        if not ret:
+            print("Unable to read first frame from first video source.")
+            cap.release()
+            return
+        frozen_frame = first_frame
 
     print("=== ROI Edit Mode ===")
     print(f"Mode (hardcoded): {mode}")
+    print(f"Source mode: {source_mode}")
+    if source_label:
+        print(f"Source: {source_label}")
     print("Controls:")
     print("  <, > : rotate between existing ROI rows")
     print("  c    : clear current ROI points")
@@ -596,9 +768,18 @@ def main_edit():
         rows = state["rows"]
 
         if cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                frame = draw_no_camera_screen(cam_name)
+            if source_mode == "video" and VIDEO_USE_SINGLE_FRAME and frozen_frame is not None:
+                frame = frozen_frame.copy()
+            else:
+                ret, frame = cap.read()
+                if not ret:
+                    if source_mode == "video":
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ret, frame = cap.read()
+                        if not ret:
+                            frame = draw_no_camera_screen(cam_name)
+                    else:
+                        frame = draw_no_camera_screen(cam_name)
         else:
             frame = draw_no_camera_screen(cam_name)
 
@@ -682,14 +863,36 @@ def main_edit():
             app_state["active_cam_pos"] = (app_state["active_cam_pos"] + 1) % len(cam_order)
             app_state["draft_points"] = []
             cap.release()
-            cap = open_camera(app_state["cam_order"][app_state["active_cam_pos"]])
+            cap, _ = open_input_source(app_state["cam_order"][app_state["active_cam_pos"]], source_mode)
+            if cap is None:
+                print("Unable to open selected input source.")
+                break
+            if source_mode == "video" and VIDEO_USE_SINGLE_FRAME:
+                ret, first_frame = cap.read()
+                if not ret:
+                    print("Unable to read first frame from selected video source.")
+                    break
+                frozen_frame = first_frame
+            else:
+                frozen_frame = None
             continue
 
         if key in (ord("m"), ord("M")):
             app_state["active_cam_pos"] = (app_state["active_cam_pos"] - 1) % len(cam_order)
             app_state["draft_points"] = []
             cap.release()
-            cap = open_camera(app_state["cam_order"][app_state["active_cam_pos"]])
+            cap, _ = open_input_source(app_state["cam_order"][app_state["active_cam_pos"]], source_mode)
+            if cap is None:
+                print("Unable to open selected input source.")
+                break
+            if source_mode == "video" and VIDEO_USE_SINGLE_FRAME:
+                ret, first_frame = cap.read()
+                if not ret:
+                    print("Unable to read first frame from selected video source.")
+                    break
+                frozen_frame = first_frame
+            else:
+                frozen_frame = None
             continue
 
         if key in (ord("s"), ord("S")):
@@ -705,7 +908,7 @@ def main_edit():
     cv2.destroyAllWindows()
 
 
-def main_view():
+def main_view(source_mode):
     """ROI visualization mode with groundtruth overlay."""
     setups = discover_roi_setups()
     if not setups:
@@ -715,14 +918,13 @@ def main_view():
     print("Loaded ROI setups:")
     for i, setup in enumerate(setups, start=1):
         seat_count = len(setup.get("seat_rois", []))
-        monitor_count = len(setup.get("monitor_rois", []))
         gt_summary = setup.get("gt_summary")
         gt_info = "gt=none"
         if gt_summary:
             gt_info = f"gt=loaded sample={gt_summary.get('sample_sec', 1.0):.1f}s"
         print(
-            f"  {i}. {setup['cam_name']} | seat={seat_count} monitor={monitor_count} "
-            f"| seat_csv={setup.get('seat_csv')} | monitor_csv={setup.get('monitor_csv')} | {gt_info}"
+            f"  {i}. {setup['cam_name']} | seat={seat_count} "
+            f"| seat_csv={setup.get('seat_csv')} | {gt_info}"
         )
         if gt_summary:
             gt_by_pc = gt_summary.get("by_pc", {})
@@ -731,16 +933,40 @@ def main_view():
                 print(f"      - {pc_name}: GT occupied {sec:.0f}s")
 
     active_idx = 0
-    cap = open_camera(setups[active_idx]["cam_name"])
+    cap, source_label = open_input_source(setups[active_idx]["cam_name"], source_mode)
+    if cap is None:
+        print("Unable to open first input source.")
+        return
+
+    frozen_frame = None
+    if source_mode == "video" and VIDEO_USE_SINGLE_FRAME:
+        ret, first_frame = cap.read()
+        if not ret:
+            print("Unable to read first frame from first video source.")
+            cap.release()
+            return
+        frozen_frame = first_frame
     cv2.namedWindow(WINDOW_NAME)
+    print(f"Source mode: {source_mode}")
+    if source_label:
+        print(f"Source: {source_label}")
 
     while True:
         setup = setups[active_idx]
 
         if cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                frame = draw_no_camera_screen(setup["cam_name"])
+            if source_mode == "video" and VIDEO_USE_SINGLE_FRAME and frozen_frame is not None:
+                frame = frozen_frame.copy()
+            else:
+                ret, frame = cap.read()
+                if not ret:
+                    if source_mode == "video":
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ret, frame = cap.read()
+                        if not ret:
+                            frame = draw_no_camera_screen(setup["cam_name"])
+                    else:
+                        frame = draw_no_camera_screen(setup["cam_name"])
         else:
             frame = draw_no_camera_screen(setup["cam_name"])
 
@@ -755,13 +981,35 @@ def main_view():
         if is_prev_key(key):
             active_idx = (active_idx - 1) % len(setups)
             cap.release()
-            cap = open_camera(setups[active_idx]["cam_name"])
+            cap, _ = open_input_source(setups[active_idx]["cam_name"], source_mode)
+            if cap is None:
+                print("Unable to open selected input source.")
+                break
+            if source_mode == "video" and VIDEO_USE_SINGLE_FRAME:
+                ret, first_frame = cap.read()
+                if not ret:
+                    print("Unable to read first frame from selected video source.")
+                    break
+                frozen_frame = first_frame
+            else:
+                frozen_frame = None
             continue
 
         if is_next_key(key):
             active_idx = (active_idx + 1) % len(setups)
             cap.release()
-            cap = open_camera(setups[active_idx]["cam_name"])
+            cap, _ = open_input_source(setups[active_idx]["cam_name"], source_mode)
+            if cap is None:
+                print("Unable to open selected input source.")
+                break
+            if source_mode == "video" and VIDEO_USE_SINGLE_FRAME:
+                ret, first_frame = cap.read()
+                if not ret:
+                    print("Unable to read first frame from selected video source.")
+                    break
+                frozen_frame = first_frame
+            else:
+                frozen_frame = None
             continue
 
         if cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
@@ -774,13 +1022,18 @@ def main_view():
 def main():
     """Main entry point with mode selector."""
     mode = str(MODE).strip().lower()
+    source_mode = str(SOURCE_MODE).strip().lower()
+    if source_mode not in ("camera", "video"):
+        print(f"Invalid SOURCE_MODE='{SOURCE_MODE}'. Set to 'camera' or 'video'.")
+        return
     
     print(f"ROI Configuration Tool - Mode: {mode.upper()}")
+    print(f"Input source mode: {source_mode.upper()}")
     
     if mode == "edit":
-        main_edit()
+        main_edit(source_mode)
     elif mode == "view":
-        main_view()
+        main_view(source_mode)
     else:
         print(f"Invalid MODE='{MODE}'. Set to 'edit' or 'view'.")
 

@@ -10,7 +10,20 @@ import numpy as np
 # - "seat": PC seat ROI polygons (PC1, PC2, ...)
 # - "monitor": monitor ROI polygons aligned to seat PC names
 # - "row_zone": full row polygons (ROW1, ROW2, ...)
-SETUP_MODE = "seat"
+SETUP_MODE = "row_zone"
+
+# Source mode:
+# - "camera": read from physical cameras using CAM_INDEXES
+# - "video": read from video files resolved by camera name
+SOURCE_MODE = "video"
+
+# Used when SOURCE_MODE == "video"
+VIDEO_INPUT_DIR = "test_vid"
+VIDEO_EXTENSIONS = [".mp4", ".avi", ".mov", ".mkv", ".m4v"]
+VIDEO_SOURCE_OVERRIDES = {
+    # "Front_right": "test_vid/Front_right.mp4",
+}
+VIDEO_USE_SINGLE_FRAME = True
 
 CAM_INDEXES = [0, 1, 2, 3]
 CAM_NAMES = {
@@ -68,6 +81,45 @@ def get_csv_path(cam_name, mode):
     return os.path.join(ROI_CONFIG_DIR, f"{cam_label}{csv_suffix_for_mode(mode)}")
 
 
+def resolve_video_path(cam_name):
+    override_path = VIDEO_SOURCE_OVERRIDES.get(cam_name)
+    if override_path and os.path.exists(override_path):
+        return override_path
+
+    safe_name = to_safe_label(cam_name)
+    candidates = [
+        cam_name,
+        safe_name,
+        cam_name.lower(),
+        safe_name.lower(),
+    ]
+
+    for name in candidates:
+        for ext in VIDEO_EXTENSIONS:
+            path = os.path.join(VIDEO_INPUT_DIR, f"{name}{ext}")
+            if os.path.exists(path):
+                return path
+
+    return None
+
+
+def open_capture_for_camera(cam_idx, cam_name, source_mode):
+    mode = str(source_mode).strip().lower()
+    if mode == "video":
+        video_path = resolve_video_path(cam_name)
+        if not video_path:
+            return None, None
+        cap = cv2.VideoCapture(video_path)
+        return cap, video_path
+
+    cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(cam_idx)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+    return cap, None
+
+
 def load_pc_names_from_seat_roi(cam_name):
     seat_csv_path = get_csv_path(cam_name, "seat")
     if not os.path.exists(seat_csv_path):
@@ -86,6 +138,15 @@ def load_pc_names_from_seat_roi(cam_name):
     except Exception as e:
         print(f"{cam_name}: failed to load seat ROI names from {seat_csv_path}: {e}")
         return []
+
+
+def build_row_zone_names_from_seats(cam_name):
+    seat_names = load_pc_names_from_seat_roi(cam_name)
+    if not seat_names:
+        return []
+
+    row_count = int(np.ceil(len(seat_names) / 3.0))
+    return [f"ROW{i}" for i in range(1, row_count + 1)]
 
 
 def default_name_for_mode(mode, index):
@@ -115,7 +176,7 @@ def save_rois(cam_name, mode, saved_rois):
     return csv_path
 
 
-def run_roi_for_camera(cam_idx, mode):
+def run_roi_for_camera(cam_idx, mode, source_mode):
     cam_name = CAM_NAMES.get(cam_idx, f"Cam_{cam_idx}")
     window_name = f"{WINDOW_PREFIX} ({mode}) - {cam_name}"
 
@@ -126,17 +187,32 @@ def run_roi_for_camera(cam_idx, mode):
             print(f"{cam_name}: loaded {len(target_names)} seat names for monitor alignment")
         else:
             print(f"{cam_name}: seat ROI not found, monitor mode will use sequential PC names")
+    elif mode == "row_zone":
+        target_names = build_row_zone_names_from_seats(cam_name)
+        if target_names:
+            print(
+                f"{cam_name}: enforcing row-zone rule from seat ROI "
+                f"({len(load_pc_names_from_seat_roi(cam_name))} seats -> {len(target_names)} rows, 3 seats/row)"
+            )
+        else:
+            print(f"{cam_name}: seat ROI not found, row_zone mode will use sequential ROW names")
 
-    cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
-    if not cap.isOpened():
-        cap = cv2.VideoCapture(cam_idx)
-
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-
-    if not cap.isOpened():
-        print(f"{cam_name}: cannot open camera, skipping.")
+    cap, video_path = open_capture_for_camera(cam_idx, cam_name, source_mode)
+    if cap is None or not cap.isOpened():
+        if source_mode == "video":
+            print(f"{cam_name}: video source not found/openable, skipping.")
+        else:
+            print(f"{cam_name}: cannot open camera, skipping.")
         return False, False
+
+    frozen_frame = None
+    if source_mode == "video" and VIDEO_USE_SINGLE_FRAME:
+        ret, first_frame = cap.read()
+        if not ret:
+            print(f"{cam_name}: unable to read first frame from video, skipping.")
+            cap.release()
+            return False, False
+        frozen_frame = first_frame
 
     state = {
         "current_points": [],
@@ -164,13 +240,25 @@ def run_roi_for_camera(cam_idx, mode):
     cv2.setMouseCallback(window_name, on_mouse)
 
     print(f"\n--- {cam_name} {mode} ROI setup ---")
+    print(f"Source mode: {source_mode}")
+    if video_path:
+        print(f"Video: {video_path}")
     print("Click 4 points on frame to define polygon")
     print("Keys: < Undo | c Clear | Enter Save ROI | n Skip target | s Next Cam | q Quit")
 
     while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+        if source_mode == "video" and VIDEO_USE_SINGLE_FRAME:
+            frame = frozen_frame.copy()
+        else:
+            ret, frame = cap.read()
+            if not ret:
+                if source_mode == "video":
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                else:
+                    break
 
         canvas = frame.copy()
         target_name = current_target_name()
@@ -238,26 +326,30 @@ def run_roi_for_camera(cam_idx, mode):
     return True, state["quit_all"]
 
 
-def main(setup_mode=None):
+def main(setup_mode=None, source_mode=None):
     mode = (setup_mode or SETUP_MODE).strip().lower()
+    source = (source_mode or SOURCE_MODE).strip().lower()
     if mode not in {"seat", "monitor", "row_zone"}:
         raise ValueError(f"Unsupported SETUP_MODE: {mode}")
+    if source not in {"camera", "video"}:
+        raise ValueError(f"Unsupported SOURCE_MODE: {source}")
 
     print("=== Unified ROI Setup Tool ===")
     print(f"Active mode: {mode}")
+    print(f"Source mode: {source}")
     print("- Opens cameras one-by-one")
     print("- Saves CSVs in tool/roi_config")
     print()
 
     for cam_idx in CAM_INDEXES:
-        opened, quit_all = run_roi_for_camera(cam_idx, mode)
+        opened, quit_all = run_roi_for_camera(cam_idx, mode, source)
         if quit_all:
             break
         if not opened:
             continue
 
     cv2.destroyAllWindows()
-    print("ROI setup finished.")
+    print(f"{mode} ROI setup finished.")
 
 
 if __name__ == "__main__":

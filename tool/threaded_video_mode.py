@@ -121,6 +121,8 @@ ROW_ZONE_CSV_SUFFIX = str(_require_config_value(CONFIG, "ROW_ZONE_CSV_SUFFIX"))
 ENABLE_ROW_RECONCILIATION = bool(_require_config_value(CONFIG, "ENABLE_ROW_RECONCILIATION"))
 ROW_RELINK_MAX_MISSING_SEC = float(_require_config_value(CONFIG, "ROW_RELINK_MAX_MISSING_SEC"))
 ROW_SUDDEN_APPEAR_WINDOW_SEC = float(_require_config_value(CONFIG, "ROW_SUDDEN_APPEAR_WINDOW_SEC"))
+# Keep a person logically seated if they disappear briefly after staying in a row zone.
+ROW_DISAPPEAR_ASSIGN_DWELL_SEC = float(_require_config_value(CONFIG, "ROW_DISAPPEAR_ASSIGN_DWELL_SEC"))
 
 # Tracking and smoothing settings
 ENABLE_RESOURCE_MONITOR = bool(_require_config_value(CONFIG, "ENABLE_RESOURCE_MONITOR"))
@@ -393,6 +395,75 @@ def box_center(box):
     return ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
 
 
+def polygon_center(polygon):
+    arr = np.asarray(polygon, dtype=np.float32)
+    if arr.ndim != 2 or arr.shape[0] == 0:
+        return (0.0, 0.0)
+    return (float(np.mean(arr[:, 0])), float(np.mean(arr[:, 1])))
+
+
+def build_row_to_pc_mapping(row_rois, pc_rois):
+    row_to_pc_names = {}
+    pc_centers = {}
+
+    if not row_rois or not pc_rois:
+        return row_to_pc_names, pc_centers
+
+    for pc_roi in pc_rois:
+        pc_name = str(pc_roi.get("pc_name", "")).strip()
+        polygon = pc_roi.get("polygon")
+        if not pc_name or polygon is None:
+            continue
+
+        center = polygon_center(polygon)
+        pc_centers[pc_name] = center
+
+        for row_roi in row_rois:
+            row_name = str(row_roi.get("pc_name", "")).strip()
+            row_polygon = row_roi.get("polygon")
+            if not row_name or row_polygon is None:
+                continue
+            if point_in_polygon(center, row_polygon):
+                row_to_pc_names.setdefault(row_name, []).append(pc_name)
+                break
+
+    return row_to_pc_names, pc_centers
+
+
+def find_nearest_unoccupied_pc_in_row(
+    row_name,
+    person_box,
+    row_to_pc_names,
+    pc_centers,
+    occupied_pc_names,
+):
+    if not row_name or not person_box:
+        return None
+
+    candidates = row_to_pc_names.get(str(row_name), [])
+    if not candidates:
+        return None
+
+    px, py = box_center(person_box)
+    best_pc = None
+    best_dist = float("inf")
+
+    for pc_name in candidates:
+        if pc_name in occupied_pc_names:
+            continue
+        center = pc_centers.get(pc_name)
+        if center is None:
+            continue
+        dx = px - float(center[0])
+        dy = py - float(center[1])
+        dist = (dx * dx + dy * dy) ** 0.5
+        if dist < best_dist:
+            best_dist = dist
+            best_pc = pc_name
+
+    return best_pc
+
+
 def predict_track_box(last_box, velocity, dt_sec):
     if dt_sec <= 0:
         return last_box
@@ -555,6 +626,10 @@ def register_row_transition(pdata, current_row, now_ts, row_states, is_new_track
     pdata["current_row"] = current_row
     pdata["row_missing_since_ts"] = None
     pdata["row_missing_row"] = None
+    if current_row:
+        pdata["current_row_since_ts"] = float(now_ts)
+    else:
+        pdata["current_row_since_ts"] = None
 
 
 def update_row_reconciliation(cam_data, frame_time_sec):
@@ -1720,6 +1795,7 @@ def build_camera_states():
 
         pc_states = init_pc_states(pc_rois, monitor_rois)
         row_states = init_row_states(row_rois)
+        row_to_pc_names, pc_centers = build_row_to_pc_mapping(row_rois, pc_rois)
         eval_groundtruth = None
         if EVAL_MODE:
             eval_groundtruth = load_groundtruth_for_camera(cam_name, cam_label)
@@ -1763,6 +1839,8 @@ def build_camera_states():
             "row_rois": row_rois,
             "pc_states": pc_states,
             "row_states": row_states,
+            "row_to_pc_names": row_to_pc_names,
+            "pc_centers": pc_centers,
             "pc_event_logs": [],
             "pc_unattended_logs": [],
             "last_pc_people_counts": {},
@@ -1911,6 +1989,8 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                             pdata["last_box"] = current_box
                             pdata["last_seen_ts"] = frame_time_sec
                             pdata["missing_since_ts"] = None
+                            pdata["fallback_pc_assignment"] = None
+                            pdata["fallback_assignment_ts"] = None
                             person_name = pdata.get("name", f"Person {matched_id}")
                             if ENABLE_ROW_RECONCILIATION:
                                 register_row_transition(
@@ -1989,11 +2069,14 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                                 "pc_enter_time": frame_time_sec if current_pc else None,
                                 "assigned_pc": None,
                                 "current_row": None,
+                                "current_row_since_ts": None,
                                 "row_missing_since_ts": None,
                                 "row_missing_row": None,
                                 "velocity": (0.0, 0.0),
                                 "last_seen_ts": frame_time_sec,
                                 "missing_since_ts": None,
+                                "fallback_pc_assignment": None,
+                                "fallback_assignment_ts": None,
                             }
                             if ENABLE_ROW_RECONCILIATION:
                                 register_row_transition(
@@ -2021,6 +2104,44 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                         continue
                     if pdata.get("missing_since_ts") is None:
                         pdata["missing_since_ts"] = frame_time_sec
+
+                        if ENABLE_ROW_RECONCILIATION:
+                            row_name = pdata.get("current_row")
+                            row_since = pdata.get("current_row_since_ts")
+                            row_dwell = 0.0
+                            if row_name and row_since is not None:
+                                row_dwell = max(0.0, frame_time_sec - float(row_since))
+
+                            if row_name and row_dwell >= ROW_DISAPPEAR_ASSIGN_DWELL_SEC:
+                                occupied_pc_names = set(pc_to_person.keys())
+                                for other_pid, other_pdata in cam_data["tracked_persons"].items():
+                                    if other_pid == pid:
+                                        continue
+                                    fallback_pc = other_pdata.get("fallback_pc_assignment")
+                                    if fallback_pc:
+                                        missing_sec_other = max(
+                                            0.0,
+                                            frame_time_sec - float(other_pdata.get("last_seen_ts", frame_time_sec)),
+                                        )
+                                        if missing_sec_other <= TRACK_MAX_MISSING_SEC:
+                                            occupied_pc_names.add(fallback_pc)
+
+                                nearest_pc = find_nearest_unoccupied_pc_in_row(
+                                    row_name,
+                                    pdata.get("last_box"),
+                                    cam_data.get("row_to_pc_names", {}),
+                                    cam_data.get("pc_centers", {}),
+                                    occupied_pc_names,
+                                )
+                                if nearest_pc:
+                                    pdata["assigned_pc"] = nearest_pc
+                                    pdata["fallback_pc_assignment"] = nearest_pc
+                                    pdata["fallback_assignment_ts"] = frame_time_sec
+                                    print(
+                                        f"{cam_data['name']}: Row-zone fallback seat assignment "
+                                        f"ID {pdata.get('name')} -> {nearest_pc}"
+                                    )
+
                     if ENABLE_ROW_RECONCILIATION and pdata.get("current_row"):
                         pdata["row_missing_since_ts"] = frame_time_sec
                         pdata["row_missing_row"] = pdata.get("current_row")
@@ -2052,6 +2173,32 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 )
 
                 pc_to_person_map = {pc_name: data[1] for pc_name, data in pc_to_person.items()}
+                fallback_pc_used = set()
+                for pid, pdata in cam_data["tracked_persons"].items():
+                    if pid in matched_track_ids:
+                        continue
+
+                    fallback_pc = pdata.get("fallback_pc_assignment")
+                    if not fallback_pc:
+                        continue
+
+                    missing_sec = max(0.0, frame_time_sec - float(pdata.get("last_seen_ts", frame_time_sec)))
+                    if missing_sec > TRACK_MAX_MISSING_SEC:
+                        pdata["fallback_pc_assignment"] = None
+                        pdata["fallback_assignment_ts"] = None
+                        continue
+
+                    if fallback_pc in pc_to_person_map or fallback_pc in fallback_pc_used:
+                        continue
+
+                    person_name = str(pdata.get("name", "")).strip()
+                    if not person_name:
+                        continue
+
+                    pc_to_person_map[fallback_pc] = person_name
+                    fallback_pc_used.add(fallback_pc)
+                    pc_people_counts[fallback_pc] = max(1, int(pc_people_counts.get(fallback_pc, 0)))
+
                 cam_data["last_pc_people_counts"] = pc_people_counts
                 update_pc_states_from_monitor(frame, cam_data.get("monitor_rois", []), cam_data.get("pc_states", {}), frame_time_sec)
                 update_pc_activity_events(
