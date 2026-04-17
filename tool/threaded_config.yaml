@@ -69,7 +69,7 @@ ENABLE_REALTIME_PC_STATE_CSV: true
 REALTIME_PC_STATE_WRITE_INTERVAL_SEC: 1.0
 
 # Live-mode model and output paths.
-MODEL_PATH: yolov8n.pt
+MODEL_PATH: yolo26s.pt
 LOG_BASE_DIR: logs
 ROI_IMAGES_SUBDIR: roi_images
 PERF_SUMMARY_FILENAME: performance_summary.csv

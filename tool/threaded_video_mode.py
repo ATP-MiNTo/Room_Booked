@@ -1879,16 +1879,7 @@ def start_resource_monitor_if_enabled(cams):
 
 def print_session_banner(cams):
     print("=== Auto ID Assignment (Video Mode) ===")
-    print("Each detected person gets a random 3-digit ID automatically")
-    print(f"ROIs saved every {SAVE_INTERVAL_SEC:.0f} seconds to roi_images/<CAM_NAME>/<ID>/")
-    print(f"Video input directory: {VIDEO_INPUT_DIR}")
-    print("Detection runs continuously (schedule disabled in video mode)")
-    print(f"Person overlap dwell threshold: {PERSON_OVERLAP_DWELL_SEC:.0f}s")
-    print(f"PC ON + no person unattended threshold: {PC_ON_NO_PERSON_DWELL_SEC/60:.0f} minutes")
-    print(f"Smoothing window (mode): {SMOOTH_WINDOW_SEC:.1f}s")
-    if FRAME_CAP_FPS > 0:
-        print(f"Frame cap: {FRAME_CAP_FPS:.1f} FPS")
-    print(f"Logs root: {LOG_BASE_DIR}")
+    print(f"Model in use: {MODEL_NAME_FOR_LOG}")
     if EVAL_MODE:
         print(f"Eval mode: ON | sample={EVAL_SAMPLE_SEC:.1f}s | groundtruth={GROUNDTRUTH_DIR}")
         print(f"Eval output root: {EVAL_LOG_ROOT}")
