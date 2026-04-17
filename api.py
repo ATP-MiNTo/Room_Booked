@@ -343,18 +343,38 @@ def post_update_user_id_pool(request: UserIdPoolUpdateRequest) -> UserIdPoolUpda
 
 @app.websocket("/ws/pc-updates")
 async def websocket_pc_updates(websocket: WebSocket):
+    client_address = websocket.client
+    print(f"[WS] Client connected: {client_address}")
+    
     await websocket.accept()
+
+    # Send initial status immediately on connect
+    current_status = load_pc_status_rows()
+    payload = {
+        "type": "pc_status",
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        "data": current_status,
+    }
+    await websocket.send_json(payload)
+    previous_status = current_status
 
     try:
         while True:
-            payload = {
-                "type": "pc_status",
-                "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-                "data": load_pc_status_rows(),
-            }
-            await websocket.send_json(payload)
+            current_status = load_pc_status_rows()
+            
+            # Send only on changes (deltas)
+            if current_status != previous_status:
+                payload = {
+                    "type": "pc_status",
+                    "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+                    "data": current_status,
+                }
+                await websocket.send_json(payload)
+                previous_status = current_status
+            
             await asyncio.sleep(1.0)
     except WebSocketDisconnect:
+        print(f"[WS] Client disconnected: {client_address}")
         return
 
 
