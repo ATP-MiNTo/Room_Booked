@@ -328,6 +328,60 @@ def get_video_frame_time_seconds(cap, cam_data):
     return float(video_seconds)
 
 
+def save_zone_roi_fallback_report_frame(cam_data, frame, frame_time_sec, fallback_assignments):
+    report_dir = cam_data.get("report_dir")
+    if not report_dir:
+        return
+
+    frame_second = int(max(0.0, float(frame_time_sec)))
+    last_saved_second = cam_data.get("zone_roi_report_last_sec")
+    if last_saved_second == frame_second:
+        return
+
+    os.makedirs(report_dir, exist_ok=True)
+    filename = f"zone_roi_no_detect_{frame_second:08d}.jpg"
+    image_path = os.path.join(report_dir, filename)
+
+    assignment_parts = []
+    for item in fallback_assignments or []:
+        person_id = str(item.get("person_id", "")).strip()
+        pc_name = str(item.get("pc_name", "")).strip()
+        if person_id and pc_name:
+            assignment_parts.append(f"{person_id}->{pc_name}")
+    assignment_text = ";".join(assignment_parts)
+
+    # Stamp precise video timestamp onto the image so it is self-contained.
+    overlay = frame.copy()
+    safe_ts = max(0.0, float(frame_time_sec))
+    whole_sec = int(safe_ts)
+    frac_4 = int((safe_ts - whole_sec) * 10000.0)
+    ts_label = f"t:{format_video_clock(safe_ts)}.{frac_4:04d}"
+    assignment_label = assignment_text if assignment_text else "none"
+    if len(assignment_label) > 90:
+        assignment_label = assignment_label[:87] + "..."
+    fallback_label = f"zone_roi:{assignment_label}"
+    box_w = min(max(360, (len(fallback_label) * 9)), max(360, overlay.shape[1] - 24))
+    cv2.rectangle(overlay, (12, 12), (12 + int(box_w), 86), (0, 0, 0), -1)
+    cv2.putText(overlay, ts_label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2)
+    cv2.putText(overlay, fallback_label, (20, 73), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (80, 255, 80), 2)
+
+    if not cv2.imwrite(image_path, overlay):
+        return
+
+    cam_data["zone_roi_report_last_sec"] = frame_second
+    cam_data.setdefault("zone_roi_report_rows", []).append(
+        {
+            "time": format_video_timestamp(frame_time_sec),
+            "clock": format_video_clock(frame_time_sec),
+            "t_sec": round(float(frame_time_sec), 3),
+            "image_file": image_path,
+            "fallback_count": len(fallback_assignments or []),
+            "fallback_assignments": assignment_text,
+            "reason": "no_person_detected_zone_roi_fallback",
+        }
+    )
+
+
 def discover_video_paths(video_dir, patterns, max_sources):
     unique_paths = set()
     patterns_to_use = patterns if isinstance(patterns, list) and patterns else ["*.mp4", "*.avi", "*.mov", "*.mkv"]
@@ -1075,6 +1129,7 @@ def collect_detection_rows(cam_idx, cam_data, sample_ts):
     sample_clock = format_video_clock(sample_ts)
     pc_states = cam_data.get("pc_states", {})
     pc_people_counts = cam_data.get("last_pc_people_counts", {})
+    pc_model_only_presence = cam_data.get("last_pc_model_only_presence", {})
     source_video = os.path.basename(str(cam_data.get("source_path", "")))
     raw_people_total = int(cam_data.get("raw_person_count", cam_data.get("person_count_raw", 0)))
     reconciled_people_total = int(cam_data.get("reconciled_person_count", raw_people_total))
@@ -1082,6 +1137,7 @@ def collect_detection_rows(cam_idx, cam_data, sample_ts):
     for pc_name in sorted(pc_states.keys(), key=pc_name_sort_key):
         state = pc_states.get(pc_name, {})
         pred_occupied = 1 if bool(state.get("person_present")) else 0
+        pred_occupied_model_only = int(pc_model_only_presence.get(pc_name, 0))
         pred_people_count = int(pc_people_counts.get(pc_name, 0))
         current_person_id = state.get("current_person_id")
         current_person_text = str(current_person_id) if current_person_id else ""
@@ -1098,6 +1154,7 @@ def collect_detection_rows(cam_idx, cam_data, sample_ts):
                 "cam_name": cam_data.get("name", ""),
                 "pc_name": pc_name,
                 "occupied_pred": pred_occupied,
+                "occupied_pred_model_only": pred_occupied_model_only,
                 "people_count_pred": pred_people_count,
                 "raw_people_count_pred": raw_people_total,
                 "reconciled_people_count_pred": reconciled_people_total,
@@ -1118,11 +1175,13 @@ def collect_eval_rows(cam_idx, cam_data, sample_ts):
     sample_clock = format_video_clock(sample_ts)
     pc_states = cam_data.get("pc_states", {})
     pc_people_counts = cam_data.get("last_pc_people_counts", {})
+    pc_model_only_presence = cam_data.get("last_pc_model_only_presence", {})
     source_video = os.path.basename(str(cam_data.get("source_path", "")))
 
     for pc_name in sorted(pc_states.keys(), key=pc_name_sort_key):
         state = pc_states.get(pc_name, {})
         pred_occupied = 1 if bool(state.get("person_present")) else 0
+        pred_occupied_model_only = int(pc_model_only_presence.get(pc_name, 0))
         pred_people_count = int(pc_people_counts.get(pc_name, 0))
         current_person_id = state.get("current_person_id")
         current_person_text = str(current_person_id) if current_person_id else ""
@@ -1150,6 +1209,7 @@ def collect_eval_rows(cam_idx, cam_data, sample_ts):
                 "cam_name": cam_data.get("name", ""),
                 "pc_name": pc_name,
                 "occupied_pred": pred_occupied,
+                "occupied_pred_model_only": pred_occupied_model_only,
                 "people_count_pred": pred_people_count,
                 "current_person_ids_pred": current_person_text,
                 "occupied_gt": occupied_gt,
@@ -1174,7 +1234,7 @@ def write_detection_outputs(cams):
         detail_path = os.path.join(cam_eval_dir, f"detection_detail_{cam_label}_{EVAL_TAG}.csv")
         detail_columns = [
             "run_tag", "model_name", "source_video", "time", "clock", "t_sec", "cam_idx", "cam_name",
-            "pc_name", "occupied_pred", "people_count_pred", "raw_people_count_pred", "reconciled_people_count_pred", "current_person_ids_pred",
+            "pc_name", "occupied_pred", "occupied_pred_model_only", "people_count_pred", "raw_people_count_pred", "reconciled_people_count_pred", "current_person_ids_pred",
         ]
         pd.DataFrame(detail_rows, columns=detail_columns).to_csv(detail_path, index=False)
 
@@ -1486,7 +1546,7 @@ def write_eval_outputs(cams):
         detail_path = os.path.join(cam_eval_dir, f"eval_detail_{cam_label}_{EVAL_TAG}.csv")
         detail_columns = [
             "eval_tag", "model_name", "source_video", "time", "clock", "t_sec", "cam_idx", "cam_name",
-            "pc_name", "occupied_pred", "people_count_pred", "current_person_ids_pred",
+            "pc_name", "occupied_pred", "occupied_pred_model_only", "people_count_pred", "current_person_ids_pred",
             "occupied_gt", "people_count_gt", "match_occupied", "abs_people_count_error",
         ]
         pd.DataFrame(detail_rows, columns=detail_columns).to_csv(detail_path, index=False)
@@ -1810,6 +1870,7 @@ def build_camera_states():
             "window": f"YOLO Person Detection ({cam_name})",
             "roi_dir": os.path.join(ROI_BASE_DIR, cam_label),
             "log_dir": os.path.join(LOG_BASE_DIR, cam_label),
+            "report_dir": os.path.join(LOG_BASE_DIR, "report", cam_label),
             "last_frame_time": None,
             "fps": 0.0,
             # process every N frames (1 = every frame). Increase to 2 or 3 to reduce inference load.
@@ -1844,6 +1905,7 @@ def build_camera_states():
             "pc_event_logs": [],
             "pc_unattended_logs": [],
             "last_pc_people_counts": {},
+            "last_pc_model_only_presence": {},
             "raw_person_count": 0,
             "reconciled_person_count": 0,
             "eval_groundtruth": eval_groundtruth,
@@ -1852,9 +1914,12 @@ def build_camera_states():
             "eval_user_sessions": [],
             "eval_active_sessions": {},
             "next_detection_sample_ts": 0.0,
+            "zone_roi_report_rows": [],
+            "zone_roi_report_last_sec": None,
         }
         os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
         os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
+        os.makedirs(cams[cam_idx]["report_dir"], exist_ok=True)
 
     if not cams:
         raise RuntimeError(f"No readable videos found in {VIDEO_INPUT_DIR}")
@@ -2164,7 +2229,13 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 )
 
                 pc_to_person_map = {pc_name: data[1] for pc_name, data in pc_to_person.items()}
+                pc_model_only_presence = {pc_name: 0 for pc_name in cam_data.get("pc_states", {}).keys()}
+                for pc_name in pc_to_person.keys():
+                    pc_model_only_presence[pc_name] = 1
+                cam_data["last_pc_model_only_presence"] = pc_model_only_presence
+
                 fallback_pc_used = set()
+                fallback_assignments_used = []
                 for pid, pdata in cam_data["tracked_persons"].items():
                     if pid in matched_track_ids:
                         continue
@@ -2189,6 +2260,18 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     pc_to_person_map[fallback_pc] = person_name
                     fallback_pc_used.add(fallback_pc)
                     pc_people_counts[fallback_pc] = max(1, int(pc_people_counts.get(fallback_pc, 0)))
+                    fallback_assignments_used.append({
+                        "person_id": person_name,
+                        "pc_name": fallback_pc,
+                    })
+
+                if person_count == 0 and fallback_assignments_used:
+                    save_zone_roi_fallback_report_frame(
+                        cam_data,
+                        frame,
+                        frame_time_sec,
+                        fallback_assignments_used,
+                    )
 
                 cam_data["last_pc_people_counts"] = pc_people_counts
                 update_pc_states_from_monitor(frame, cam_data.get("monitor_rois", []), cam_data.get("pc_states", {}), frame_time_sec)
@@ -2383,6 +2466,22 @@ def save_session_outputs(cams, run_start_day_tag, pc_state_all_csv):
         # collect unattended/person-flag logs for one combined file in logs/
         all_unattended_logs.extend(cam_data.get("pc_unattended_logs", []))
 
+        report_rows = cam_data.get("zone_roi_report_rows", [])
+        report_dir = cam_data.get("report_dir", os.path.join(LOG_BASE_DIR, "report", safe_name))
+        if report_rows:
+            report_csv_path = os.path.join(report_dir, "timestamp.csv")
+            report_columns = [
+                "time",
+                "clock",
+                "t_sec",
+                "image_file",
+                "fallback_count",
+                "fallback_assignments",
+                "reason",
+            ]
+            pd.DataFrame(report_rows, columns=report_columns).to_csv(report_csv_path, index=False)
+            print(f"Zone ROI fallback report saved to {report_csv_path}")
+
         print(f"\n=== Session Summary ({cam_data['name']}) ===")
         print(f"Total unique persons detected: {len(cam_data['tracked_persons'])}")
         if len(people_csv_paths) == 1:
@@ -2397,6 +2496,8 @@ def save_session_outputs(cams, run_start_day_tag, pc_state_all_csv):
                 f"PC activity events saved to {len(pc_event_csv_paths)} daily file(s): "
                 f"{pc_event_csv_paths[0]} -> {pc_event_csv_paths[-1]}"
             )
+        if report_rows:
+            print(f"Zone ROI no-detect snapshots: {len(report_rows)} frame(s) in {report_dir}")
         # performance summary
         frames = cam_data.get("frames_seen", 0)
         total_latency_ms = cam_data.get("total_latency_ms", 0.0)

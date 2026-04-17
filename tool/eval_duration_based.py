@@ -21,7 +21,7 @@ def pc_name_sort_key(pc_name):
     return (number, text)
 
 
-def build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0):
+def build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0, occupied_key="occupied_pred"):
     pc_rows = [r for r in detail_rows if r.get("pc_name") == pc_name]
     if not pc_rows:
         return []
@@ -33,7 +33,7 @@ def build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0
     last_occupied = None
 
     for row in pc_rows_sorted:
-        occupied_pred = int(row.get("occupied_pred", 0))
+        occupied_pred = int(row.get(occupied_key, row.get("occupied_pred", 0)))
         t_sec = float(row.get("t_sec", 0))
 
         if occupied_pred == 1:
@@ -156,13 +156,25 @@ def compute_people_count_accuracy(detail_rows, gt_lookup, pc_name):
 
 
 def compute_duration_metrics(detail_rows, gt_lookup, pc_name, video_end_ts=None):
-    pred_intervals = build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0)
+    pred_intervals = build_occupancy_intervals_from_detail(
+        detail_rows,
+        pc_name,
+        debounce_sec=2.0,
+        occupied_key="occupied_pred",
+    )
+    pred_model_only_intervals = build_occupancy_intervals_from_detail(
+        detail_rows,
+        pc_name,
+        debounce_sec=2.0,
+        occupied_key="occupied_pred_model_only",
+    )
     gt_intervals = build_gt_occupancy_intervals(gt_lookup, pc_name, video_end_ts)
     if not gt_intervals:
         return None
 
     gt_total_sec = sum(end - start for start, end in gt_intervals)
     pred_total_sec = sum(end - start for start, end in pred_intervals)
+    pred_total_sec_model_only = sum(end - start for start, end in pred_model_only_intervals)
 
     total_overlap_sec = 0.0
     for pred_interval in pred_intervals:
@@ -177,6 +189,7 @@ def compute_duration_metrics(detail_rows, gt_lookup, pc_name, video_end_ts=None)
     return {
         "gt_occupied_sec": round(gt_total_sec, 2),
         "pred_occupied_sec": round(pred_total_sec, 2),
+        "pred_occupied_sec_model_only": round(pred_total_sec_model_only, 2),
         "occupied_accuracy_percent": round(occupied_accuracy_percent, 2),
         "count_accuracy_percent": count_metrics["count_accuracy_percent"],
         "count_correct_samples": count_metrics["count_correct_samples"],
@@ -276,6 +289,7 @@ def run_eval_only_duration(eval_log_root, groundtruth_dir):
         cam_gt_total = 0.0
         cam_overlap_total = 0.0
         cam_over_occupancy_total = 0.0
+        cam_pred_model_only_total = 0.0
         cam_count_correct_samples = 0
         cam_count_total_samples = 0
 
@@ -291,6 +305,7 @@ def run_eval_only_duration(eval_log_root, groundtruth_dir):
                 "model_name": detail_df["model_name"].iloc[0] if len(detail_df) > 0 else "unknown",
                 "gt_occupied_sec": metrics["gt_occupied_sec"],
                 "pred_occupied_sec": metrics["pred_occupied_sec"],
+                "pred_occupied_sec_model_only": metrics["pred_occupied_sec_model_only"],
                 "occupied_accuracy_percent": metrics["occupied_accuracy_percent"],
                 "count_accuracy_percent": metrics["count_accuracy_percent"],
             })
@@ -298,6 +313,7 @@ def run_eval_only_duration(eval_log_root, groundtruth_dir):
             cam_gt_total += float(metrics["gt_occupied_sec"])
             cam_overlap_total += float(metrics.get("_overlap_sec_internal", 0.0))
             cam_over_occupancy_total += float(metrics.get("_over_occupancy_sec_internal", 0.0))
+            cam_pred_model_only_total += float(metrics.get("pred_occupied_sec_model_only", 0.0))
             cam_count_correct_samples += int(metrics.get("count_correct_samples", 0))
             cam_count_total_samples += int(metrics.get("count_total_samples", 0))
 
@@ -311,6 +327,7 @@ def run_eval_only_duration(eval_log_root, groundtruth_dir):
                 "model_name": detail_df["model_name"].iloc[0] if len(detail_df) > 0 else "unknown",
                 "gt_occupied_sec": round(cam_gt_total, 2),
                 "pred_occupied_sec": round(pred_total, 2),
+                "pred_occupied_sec_model_only": round(cam_pred_model_only_total, 2),
                 "occupied_accuracy_percent": round(coverage * 100.0, 2),
                 "count_accuracy_percent": round((100.0 * cam_count_correct_samples / cam_count_total_samples) if cam_count_total_samples > 0 else 0.0, 2),
             })
@@ -319,7 +336,7 @@ def run_eval_only_duration(eval_log_root, groundtruth_dir):
     if all_summary_rows:
         summary_path = os.path.join(eval_log_root, "eval_summary_duration_based.csv")
         summary_columns = [
-            "pc_name", "cam_name", "model_name", "gt_occupied_sec", "pred_occupied_sec",
+            "pc_name", "cam_name", "model_name", "gt_occupied_sec", "pred_occupied_sec", "pred_occupied_sec_model_only",
             "occupied_accuracy_percent", "count_accuracy_percent",
         ]
         all_summary_rows = sorted(
