@@ -64,6 +64,9 @@ TRACK_MAX_PREDICTION_SPEED_PX_PER_SEC: 600.0
 SMOOTH_WINDOW_SEC: 5.0
 HOLD_VISUAL_MIN_SEC: 0.35
 
+# Sudden disappear detection: corner margin as fraction of frame (18% = near edges).
+SUDDEN_DISAPPEAR_CORNER_MARGIN_RATIO: 0.18
+
 # Realtime aggregated PC state output.
 ENABLE_REALTIME_PC_STATE_CSV: true
 REALTIME_PC_STATE_WRITE_INTERVAL_SEC: 1.0

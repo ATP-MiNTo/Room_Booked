@@ -190,6 +190,11 @@ MODEL_NAME_FOR_LOG = os.path.basename(MODEL_PATH)
 PEOPLE_COUNT_DWELL_SEC = 2.0
 # Avoid showing hold box for a single-frame miss.
 HOLD_VISUAL_MIN_SEC = max(0.0, float(_require_config_value(CONFIG, "HOLD_VISUAL_MIN_SEC")))
+# Consider a person "near corner" if the center is inside this ratio box from any corner.
+SUDDEN_DISAPPEAR_CORNER_MARGIN_RATIO = max(
+    0.05,
+    min(0.5, float(_require_config_value(CONFIG, "SUDDEN_DISAPPEAR_CORNER_MARGIN_RATIO"))),
+)
 
 # ----------------------------------------------------------------------------------------------
 
@@ -328,7 +333,33 @@ def get_video_frame_time_seconds(cap, cam_data):
     return float(video_seconds)
 
 
-def save_zone_roi_fallback_report_frame(cam_data, frame, frame_time_sec, fallback_assignments):
+def is_box_far_from_camera_corners(box, frame_shape, corner_margin_ratio=SUDDEN_DISAPPEAR_CORNER_MARGIN_RATIO):
+    if box is None or frame_shape is None or len(frame_shape) < 2:
+        return False
+
+    frame_h, frame_w = int(frame_shape[0]), int(frame_shape[1])
+    if frame_h <= 0 or frame_w <= 0:
+        return False
+
+    cx, cy = box_center(box)
+    margin_x = max(1.0, float(frame_w) * float(corner_margin_ratio))
+    margin_y = max(1.0, float(frame_h) * float(corner_margin_ratio))
+
+    near_top_left = (cx <= margin_x) and (cy <= margin_y)
+    near_top_right = (cx >= (frame_w - margin_x)) and (cy <= margin_y)
+    near_bottom_left = (cx <= margin_x) and (cy >= (frame_h - margin_y))
+    near_bottom_right = (cx >= (frame_w - margin_x)) and (cy >= (frame_h - margin_y))
+    near_corner = near_top_left or near_top_right or near_bottom_left or near_bottom_right
+    return not near_corner
+
+
+def save_zone_roi_fallback_report_frame(
+    cam_data,
+    frame,
+    frame_time_sec,
+    fallback_assignments,
+    reason="no_person_detected_zone_roi_fallback",
+):
     report_dir = cam_data.get("report_dir")
     if not report_dir:
         return
@@ -377,9 +408,70 @@ def save_zone_roi_fallback_report_frame(cam_data, frame, frame_time_sec, fallbac
             "image_file": image_path,
             "fallback_count": len(fallback_assignments or []),
             "fallback_assignments": assignment_text,
-            "reason": "no_person_detected_zone_roi_fallback",
+            "reason": str(reason or "no_person_detected_zone_roi_fallback"),
+            "person_id": "",
+            "pc_name": "",
+            "frame_type": "single",
         }
     )
+
+
+def save_sudden_disappear_report_frames(cam_data, frame_before, frame_after, frame_time_sec, person_id, pc_name):
+    report_dir = cam_data.get("report_dir")
+    if not report_dir:
+        return
+    if frame_before is None or frame_after is None:
+        return
+
+    os.makedirs(report_dir, exist_ok=True)
+    safe_ts = max(0.0, float(frame_time_sec))
+    person_text = str(person_id or "").strip() or "unknown"
+    pc_text = str(pc_name or "").strip() or "unknown"
+    reason = "sudden_disappear_far_from_corner"
+
+    # Track disappear count per person to keep pairs numbered.
+    disappear_counters = cam_data.setdefault("disappear_person_counters", {})
+    disappear_counters[person_text] = disappear_counters.get(person_text, 0) + 1
+    pair_num = disappear_counters[person_text]
+    pair_label = f"{pair_num:02d}"
+
+    rows_to_append = []
+    for frame_type, img in (("before", frame_before), ("disappear", frame_after)):
+        overlay = img.copy()
+        whole_sec = int(safe_ts)
+        frac_4 = int((safe_ts - whole_sec) * 10000.0)
+        ts_label = f"t:{format_video_clock(safe_ts)}.{frac_4:04d}"
+        meta_label = f"{reason}:{person_text}->{pc_text} [{frame_type}]"
+        if len(meta_label) > 96:
+            meta_label = meta_label[:93] + "..."
+
+        box_w = min(max(420, (len(meta_label) * 8)), max(420, overlay.shape[1] - 24))
+        cv2.rectangle(overlay, (12, 12), (12 + int(box_w), 88), (0, 0, 0), -1)
+        cv2.putText(overlay, ts_label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2)
+        cv2.putText(overlay, meta_label, (20, 74), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (120, 255, 120), 2)
+
+        filename = f"sudden_disappear_{person_text}_{pair_label}_{frame_type}.jpg"
+        image_path = os.path.join(report_dir, filename)
+        if not cv2.imwrite(image_path, overlay):
+            continue
+
+        rows_to_append.append(
+            {
+                "time": format_video_timestamp(frame_time_sec),
+                "clock": format_video_clock(frame_time_sec),
+                "t_sec": round(float(frame_time_sec), 3),
+                "image_file": image_path,
+                "fallback_count": 1,
+                "fallback_assignments": f"{person_text}->{pc_text}",
+                "reason": reason,
+                "person_id": person_text,
+                "pc_name": pc_text,
+                "frame_type": frame_type,
+            }
+        )
+
+    if rows_to_append:
+        cam_data.setdefault("zone_roi_report_rows", []).extend(rows_to_append)
 
 
 def discover_video_paths(video_dir, patterns, max_sources):
@@ -1945,6 +2037,8 @@ def build_camera_states():
             "next_detection_sample_ts": 0.0,
             "zone_roi_report_rows": [],
             "zone_roi_report_last_sec": None,
+            "last_raw_frame": None,
+            "disappear_person_counters": {},
         }
         os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
         os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
@@ -1995,6 +2089,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
             ret, frame = cap.read()
             if not ret:
                 break
+            raw_frame = frame.copy()
 
             frame_time_sec = get_video_frame_time_seconds(cap, cam_data)
             if cam_data.get("first_video_time") is None:
@@ -2203,6 +2298,30 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     if pdata.get("missing_since_ts") is None:
                         pdata["missing_since_ts"] = frame_time_sec
 
+                        # Report sudden disappear event when person vanishes away from camera corners.
+                        last_box = pdata.get("last_box")
+                        prev_raw_frame = cam_data.get("last_raw_frame")
+                        if (
+                            last_box
+                            and prev_raw_frame is not None
+                            and is_box_far_from_camera_corners(last_box, raw_frame.shape)
+                        ):
+                            person_name_for_report = str(pdata.get("name", f"Person {pid}"))
+                            pc_name_for_report = (
+                                pdata.get("fallback_pc_assignment")
+                                or pdata.get("assigned_pc")
+                                or pdata.get("current_pc")
+                                or "unknown"
+                            )
+                            save_sudden_disappear_report_frames(
+                                cam_data,
+                                prev_raw_frame,
+                                raw_frame,
+                                frame_time_sec,
+                                person_name_for_report,
+                                pc_name_for_report,
+                            )
+
                         if ENABLE_ROW_RECONCILIATION:
                             row_name = pdata.get("current_row")
                             row_since = pdata.get("current_row_since_ts")
@@ -2316,12 +2435,47 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                         "pc_name": fallback_pc,
                     })
 
-                if person_count == 0 and fallback_assignments_used:
+                # If row-zone logic is disabled (or no fallback seat is available),
+                # still report track-hold losses so debugging snapshots are produced.
+                hold_assignments_used = []
+                for pid, pdata in cam_data["tracked_persons"].items():
+                    if pid in matched_track_ids:
+                        continue
+
+                    missing_sec = max(0.0, frame_time_sec - float(pdata.get("last_seen_ts", frame_time_sec)))
+                    if missing_sec > TRACK_MAX_MISSING_SEC:
+                        continue
+
+                    person_name = str(pdata.get("name", "")).strip()
+                    if not person_name:
+                        continue
+
+                    guessed_pc = (
+                        pdata.get("fallback_pc_assignment")
+                        or pdata.get("assigned_pc")
+                        or pdata.get("current_pc")
+                        or "unknown"
+                    )
+                    hold_assignments_used.append(
+                        {
+                            "person_id": person_name,
+                            "pc_name": str(guessed_pc),
+                        }
+                    )
+
+                report_assignments_used = fallback_assignments_used if fallback_assignments_used else hold_assignments_used
+                if person_count == 0 and report_assignments_used:
+                    report_reason = (
+                        "no_person_detected_zone_roi_fallback"
+                        if fallback_assignments_used
+                        else "no_person_detected_track_hold"
+                    )
                     save_zone_roi_fallback_report_frame(
                         cam_data,
                         frame,
                         frame_time_sec,
-                        fallback_assignments_used,
+                        report_assignments_used,
+                        reason=report_reason,
                     )
 
                 cam_data["last_pc_people_counts"] = pc_people_counts
@@ -2372,6 +2526,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     collect_eval_rows(cam_idx, cam_data, next_sample_ts)
                 next_sample_ts += EVAL_SAMPLE_SEC
             cam_data["next_detection_sample_ts"] = next_sample_ts
+            cam_data["last_raw_frame"] = raw_frame
 
             frame_end = time.time()
             latency_ms = (frame_end - loop_wall_start) * 1000.0
@@ -2529,9 +2684,12 @@ def save_session_outputs(cams, run_start_day_tag, pc_state_all_csv):
                 "fallback_count",
                 "fallback_assignments",
                 "reason",
+                "person_id",
+                "pc_name",
+                "frame_type",
             ]
             pd.DataFrame(report_rows, columns=report_columns).to_csv(report_csv_path, index=False)
-            print(f"Zone ROI fallback report saved to {report_csv_path}")
+            print(f"Disappearance report saved to {report_csv_path}")
 
         print(f"\n=== Session Summary ({cam_data['name']}) ===")
         print(f"Total unique persons detected: {len(cam_data['tracked_persons'])}")
