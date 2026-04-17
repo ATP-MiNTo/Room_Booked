@@ -165,6 +165,8 @@ Notes:
 - Uses video filename stem for source label + per-source log naming
 - Outputs go under `VIDEO_LOG_BASE_DIR` (default `logs_video_mode`)
 - Default run mode is unchanged if `--eval` is not passed
+- **Session banner** displays: model in use, eval mode config (if enabled), video sources, and quit instruction
+- To change model for testing: update `MODEL_PATH` in `tool/threaded_config.yaml` and restart the script
 
 For ROI reuse, keep video filenames aligned with ROI camera labels (example: `Front_right.mp4`, `Back_left.mp4`).
 
@@ -174,22 +176,28 @@ For ROI reuse, keep video filenames aligned with ROI camera labels (example: `Fr
 python tool\threaded_video_mode.py --eval
 ```
 
-Eval mode loads groundtruth from `tool\groundtruth\{CameraLabel}_gt.csv` and writes:
+Eval mode runs inference on videos and loads groundtruth from `tool\groundtruth\{CameraLabel}_gt.csv` for comparison. Writes:
 
-- per-camera detailed eval logs
+- per-camera detailed eval logs with predictions vs. groundtruth
 - per-camera user-seat session intervals
-- eval summary CSV with simplified columns:
+- per-camera detection snapshots (timestamp, occupancy, people count)
+- eval summary CSV with metrics:
     - `pc_name`, `cam_name`, `model_name`
-    - `gt_occupied_sec`, `pred_occupied_sec`
-    - `occupied_accuracy_percent`, `count_accuracy_percent`
+    - `samples`, `tp`, `tn`, `fp`, `fn`
+    - `accuracy`, `precision`, `recall`, `f1`
+    - `mae_people_count`, `match_rate_people_count_exact`
+    - `occupied_time_pred_sec`, `occupied_time_gt_sec`, `occupied_time_abs_error_sec`
 
 Optional eval arguments:
 
-- `--eval-tag <name>` to tag output files
-- `--eval-sample-sec <seconds>` to change the sampling interval
+- `--eval-tag <name>` to tag output files (default: `eval_YYYYMMDD_HHMMSS`)
+- `--eval-sample-sec <seconds>` to change the sampling interval (default: `1.0`)
 - `--groundtruth-dir <path>` to point to another groundtruth folder
 - `--eval-log-dir <path>` to change the eval output root
 - `--video-input-dir <path>` to override the video folder for one run
+- `--eval-only` to re-evaluate existing eval outputs without re-running inference (for duration-based analysis)
+
+**Testing different models**: change `MODEL_PATH` in `tool/threaded_config.yaml`, use `--eval-tag` to distinguish eval runs.
 
 ---
 
@@ -227,7 +235,10 @@ Open API docs:
     - `replace=true` overwrites pool; `replace=false` appends unique valid IDs.
     - Invalid IDs (not exactly 10 digits) are rejected with HTTP `400`.
 - `WS /ws/pc-updates`
-    - Realtime push stream (about once per second) of all-PC status.
+    - Realtime push stream of all-PC status.
+    - **Behavior**: sends full status immediately on client connect, then sends updates only when status changes (delta approach).
+    - **Connection logging**: console prints `[WS] Client connected: (IP, PORT)` and `[WS] Client disconnected: (IP, PORT)`.
+    - Polling interval: 1 second (checks for changes; only sends when detected).
 
 ID policy note:
 
@@ -235,10 +246,12 @@ ID policy note:
 - IDs are expected to be supplied by external systems (direct preferred ID or preloaded pool).
 - Issued IDs are persisted to `logs/user_id_state.json` (`pool` and `issued`).
 
-WebSocket note:
+WebSocket notes:
 
 - Normal `GET` API: website requests data each time (polling).
-- WebSocket API: website keeps one open connection and receives pushed updates instantly.
+- WebSocket API: website keeps one open connection and receives initial state immediately on connect, then receives updates only when status changes.
+- **Initial sync + delta updates**: clients always get baseline on connect (no waiting for first change), then only network traffic for actual changes (bandwidth efficient).
+- Logs connection events to console for debugging.
 
 ---
 
