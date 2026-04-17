@@ -17,4 +17,5 @@ logs_video_mode/Back_left*
 logs_video_mode/Back_right*
 logs_video_mode/Front_left*
 logs_video_mode/Front_right*
+logs_video_mode/eval
 pc_state_all.csv
