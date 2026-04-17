@@ -3,7 +3,7 @@ ultralytics
 pandas
 PyYAML
 fastapi
-uvicorn
+uvicorn[standard]
 
 # --extra-index-url https://download.pytorch.org/whl/cu130
 --extra-index-url https://download.pytorch.org/whl/cu128
