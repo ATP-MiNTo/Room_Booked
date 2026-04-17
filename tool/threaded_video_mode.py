@@ -564,6 +564,35 @@ def match_box_to_person(box, tracked_persons, now_ts, unavailable_ids=None):
     return matched_id
 
 
+def match_box_to_recent_hold_track(box, tracked_persons, now_ts, unavailable_ids=None):
+    """Fallback matcher: reuse a nearby recently-missing track before creating a new ID."""
+    blocked_ids = unavailable_ids or set()
+    best_score = float("inf")
+    matched_id = None
+
+    for pid, pdata in tracked_persons.items():
+        if pid in blocked_ids:
+            continue
+
+        last_box = pdata.get("last_box")
+        if not last_box:
+            continue
+
+        last_seen_ts = float(pdata.get("last_seen_ts", now_ts))
+        missing_sec = max(0.0, float(now_ts) - last_seen_ts)
+        if missing_sec <= 0.0 or missing_sec > TRACK_MAX_MISSING_SEC:
+            continue
+
+        # Use the most recently seen box with a slightly wider gate for short re-acquisition windows.
+        dist = distance(box, last_box)
+        allowed_dist = max(TRACK_MATCH_DISTANCE_PX * 1.5, TRACK_MATCH_DISTANCE_PX + 30.0)
+        if dist <= allowed_dist and dist < best_score:
+            best_score = dist
+            matched_id = pid
+
+    return matched_id
+
+
 def prune_stale_tracks(tracked_persons, now_ts):
     stale_ids = []
     for pid, pdata in tracked_persons.items():
@@ -1991,6 +2020,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
             )
 
             person_count = 0
+            cache_frame_no_hold = None
 
             if do_infer:
                 # run inference (use AMP autocast if CUDA available)
@@ -2006,6 +2036,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 pc_to_person = {}
                 pc_people_counts = {}
                 matched_track_ids = set()
+                detected_person_boxes = []
 
                 for box in results[0].boxes:
                     cls = int(box.cls[0])
@@ -2014,6 +2045,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                         person_count += 1
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         current_box = (x1, y1, x2, y2)
+                        detected_person_boxes.append(current_box)
 
                         # determine which PC this person is in
                         current_pc = get_pc_for_box(current_box, cam_data["pc_rois"]) if ENABLE_PC_ROI else None
@@ -2025,6 +2057,13 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                             frame_time_sec,
                             unavailable_ids=matched_track_ids,
                         )
+                        if matched_id is None:
+                            matched_id = match_box_to_recent_hold_track(
+                                current_box,
+                                cam_data["tracked_persons"],
+                                frame_time_sec,
+                                unavailable_ids=matched_track_ids,
+                            )
                         if matched_id is not None:
                             matched_track_ids.add(matched_id)
                             pdata = cam_data["tracked_persons"][matched_id]
@@ -2155,6 +2194,9 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                             if prev is None or conf > prev[0]:
                                 pc_to_person[current_pc] = (conf, person_name)
 
+                # Cache a clean annotated frame before drawing hold overlays.
+                cache_frame_no_hold = frame.copy()
+
                 for pid, pdata in cam_data["tracked_persons"].items():
                     if pid in matched_track_ids:
                         continue
@@ -2207,6 +2249,15 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     if last_box:
                         missing_sec = max(0.0, frame_time_sec - float(pdata.get("last_seen_ts", frame_time_sec)))
                         if HOLD_VISUAL_MIN_SEC <= missing_sec <= TRACK_MAX_MISSING_SEC:
+                            # Suppress hold box when a fresh detection is near this track's last position.
+                            near_fresh_detection = False
+                            for det_box in detected_person_boxes:
+                                if distance(last_box, det_box) <= max(TRACK_MATCH_DISTANCE_PX * 1.5, TRACK_MATCH_DISTANCE_PX + 30.0):
+                                    near_fresh_detection = True
+                                    break
+                            if near_fresh_detection:
+                                continue
+
                             x1, y1, x2, y2 = map(int, last_box)
                             hold_color = (0, 165, 255)
                             hold_name = str(pdata.get("name", f"Person {pid}"))
@@ -2308,7 +2359,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     reconciled_total = int(cam_data.get("reconciled_person_count", raw_total))
                     cv2.putText(frame, f"Raw/Reconciled: {raw_total}/{reconciled_total}", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
                 if do_infer:
-                    cam_data["last_annotated_frame"] = frame.copy()
+                    cam_data["last_annotated_frame"] = cache_frame_no_hold.copy() if cache_frame_no_hold is not None else frame.copy()
             else:
                 update_smoothed_person_count(cam_data, 0, frame_time_sec)
 
