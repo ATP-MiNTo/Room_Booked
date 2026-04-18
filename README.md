@@ -25,16 +25,15 @@
 
 ## 🚀 วิธีรันโปรเจกต์
 
-1. Clone โปรเจกต์
+**1. Clone โปรเจกต์**
 ```bash
 git clone <repository-url>
 cd complab-reservation-monitoring
 ```
 
-2. สร้างไฟล์ .env (ดูตัวอย่างด้านล่าง)
+**2. สร้างไฟล์ .env (ดูตัวอย่างด้านล่าง)**
 
-
-3. รัน Docker
+**3. รัน Docker**
 ```bash
 docker-compose up -d --build
 ```
@@ -177,8 +176,8 @@ complab-reservation/
 ```bash
 docker-compose up -d --build
 ```
+**หยุดระบบ**
 ```bash
-# หยุดระบบ
 docker-compose down
 ```
 # ดู logs
