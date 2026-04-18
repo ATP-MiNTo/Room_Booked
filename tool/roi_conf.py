@@ -613,7 +613,7 @@ def draw_overlay(frame, setup, cam_idx, total):
     cam_index = CAM_NAME_TO_INDEX.get(cam_name, "?")
     header = (
         f"Camera {cam_idx + 1}/{total}: {cam_name} (index {cam_index}) | "
-        f"Seat ROI: {len(seat_rois)} | Monitor ROI: {len(monitor_rois)} | Gate ROI: {len(gate_rois)}"
+        f"Seat ROI: {len(seat_rois)} | Monitor ROI: {len(monitor_rois)}"
     )
     cv2.putText(canvas, header, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, TITLE_COLOR, 2)
 

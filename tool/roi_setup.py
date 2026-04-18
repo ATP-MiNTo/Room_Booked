@@ -140,15 +140,6 @@ def load_pc_names_from_seat_roi(cam_name):
         return []
 
 
-def build_gate_names_from_seats(cam_name):
-    seat_names = load_pc_names_from_seat_roi(cam_name)
-    if not seat_names:
-        return []
-
-    gate_count = int(np.ceil(len(seat_names) / 3.0))
-    return [f"GATE{i}" for i in range(1, gate_count + 1)]
-
-
 def default_name_for_mode(mode, index):
     if mode in ("seat", "monitor"):
         return f"PC{index}"
@@ -188,14 +179,7 @@ def run_roi_for_camera(cam_idx, mode, source_mode):
         else:
             print(f"{cam_name}: seat ROI not found, monitor mode will use sequential PC names")
     elif mode == "gate":
-        target_names = build_gate_names_from_seats(cam_name)
-        if target_names:
-            print(
-                f"{cam_name}: enforcing gate grouping from seat ROI "
-                f"({len(load_pc_names_from_seat_roi(cam_name))} seats -> {len(target_names)} gates, 3 seats/gate)"
-            )
-        else:
-            print(f"{cam_name}: seat ROI not found, gate mode will use sequential GATE names")
+        print(f"{cam_name}: gate mode is independent from seat ROI and uses sequential GATE names")
 
     cap, video_path = open_capture_for_camera(cam_idx, cam_name, source_mode)
     if cap is None or not cap.isOpened():
