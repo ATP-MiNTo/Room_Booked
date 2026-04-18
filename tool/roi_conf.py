@@ -59,7 +59,7 @@ GROUNDTRUTH_DIR = os.path.join("tool", "groundtruth")
 
 SEAT_CSV_SUFFIX = "_roi.csv"
 MONITOR_CSV_SUFFIX = "_monitor_roi.csv"
-ROW_ZONE_CSV_SUFFIX = "_row_zone_roi.csv"
+GATE_CSV_SUFFIX = "_gate_roi.csv"
 GT_CSV_SUFFIX = "_gt.csv"
 REQUIRED_POINTS_PER_ROI = 4
 
@@ -428,8 +428,8 @@ def discover_groundtruth_summaries():
 def parse_cam_name_and_type(csv_path):
     """Parse camera name and ROI type from CSV path."""
     name = os.path.basename(csv_path)
-    if name.endswith(ROW_ZONE_CSV_SUFFIX):
-        return name[: -len(ROW_ZONE_CSV_SUFFIX)], "row_zone"
+    if name.endswith(GATE_CSV_SUFFIX):
+        return name[: -len(GATE_CSV_SUFFIX)], "gate"
     if name.endswith(MONITOR_CSV_SUFFIX):
         return name[: -len(MONITOR_CSV_SUFFIX)], "monitor"
     if name.endswith(SEAT_CSV_SUFFIX):
@@ -437,46 +437,46 @@ def parse_cam_name_and_type(csv_path):
     return os.path.splitext(name)[0], "unknown"
 
 
-def infer_row_label_for_pc(pc_name, seat_index):
-    """Map each 3 pc seats into one row label (ROW1, ROW2, ...)."""
+def infer_gate_label_for_pc(pc_name, seat_index):
+    """Map each 3 pc seats into one gate label (GATE1, GATE2, ...)."""
     digits = "".join(ch for ch in str(pc_name) if ch.isdigit())
     if digits:
         pc_num = int(digits)
         if pc_num > 0:
-            return f"ROW{((pc_num - 1) // 3) + 1}"
-    return f"ROW{(seat_index // 3) + 1}"
+            return f"GATE{((pc_num - 1) // 3) + 1}"
+    return f"GATE{(seat_index // 3) + 1}"
 
 
-def build_pc_to_row_map(seat_rois):
+def build_pc_to_gate_map(seat_rois):
     mapping = {}
     for i, roi in enumerate(seat_rois):
         pc_name = roi.get("pc_name", "").strip()
         if not pc_name:
             continue
-        mapping[pc_name] = infer_row_label_for_pc(pc_name, i)
+        mapping[pc_name] = infer_gate_label_for_pc(pc_name, i)
     return mapping
 
 
-def zone_label_from_row(row_label):
-    text = str(row_label or "").strip().upper()
-    if text.startswith("ROW"):
-        suffix = text[3:]
+def zone_label_from_gate(gate_label):
+    text = str(gate_label or "").strip().upper()
+    if text.startswith("GATE"):
+        suffix = text[4:]
         if suffix.isdigit():
-            return f"Zone{int(suffix)}"
+            return f"Gate{int(suffix)}"
     digits = "".join(ch for ch in text if ch.isdigit())
     if digits:
-        return f"Zone{int(digits)}"
-    return "Zone?"
+        return f"Gate{int(digits)}"
+    return "Gate?"
 
 
-def format_seat_display(seat_index, pc_name, row_label, gt_seconds):
-    zone_label = zone_label_from_row(row_label)
+def format_seat_display(seat_index, pc_name, gate_label, gt_seconds):
+    zone_label = zone_label_from_gate(gate_label)
     gt_text = "---" if gt_seconds is None else f"{float(gt_seconds):.0f}"
     return f"Seat{seat_index} | {pc_name} | {zone_label} (gt={gt_text}s)"
 
 
-def seat_display_segments(seat_index, pc_name, row_label, gt_seconds):
-    zone_label = zone_label_from_row(row_label)
+def seat_display_segments(seat_index, pc_name, gate_label, gt_seconds):
+    zone_label = zone_label_from_gate(gate_label)
     gt_text = "---" if gt_seconds is None else f"{float(gt_seconds):.0f}"
     return [
         (f"Seat{seat_index}", SEAT_LABEL_SEAT_COLOR),
@@ -520,13 +520,16 @@ def discover_roi_setups():
     """Discover all ROI setups from CSV files."""
     seat_files = sorted(glob.glob(os.path.join(ROI_CONFIG_DIR, f"*{SEAT_CSV_SUFFIX}")))
     monitor_files = sorted(glob.glob(os.path.join(ROI_CONFIG_DIR, f"*{MONITOR_CSV_SUFFIX}")))
-    row_zone_files = sorted(glob.glob(os.path.join(ROI_CONFIG_DIR, f"*{ROW_ZONE_CSV_SUFFIX}")))
+    gate_files = sorted(glob.glob(os.path.join(ROI_CONFIG_DIR, f"*{GATE_CSV_SUFFIX}")))
 
-    # *_monitor_roi.csv and *_row_zone_roi.csv also match *_roi.csv glob,
+    # *_monitor_roi.csv and *_gate_roi.csv also match *_roi.csv glob,
     # so keep only true seat files here.
     seat_files = [
         path for path in seat_files
-        if (not path.endswith(MONITOR_CSV_SUFFIX) and not path.endswith(ROW_ZONE_CSV_SUFFIX))
+        if (
+            not path.endswith(MONITOR_CSV_SUFFIX)
+            and not path.endswith(GATE_CSV_SUFFIX)
+        )
     ]
 
     setups = {}
@@ -539,10 +542,10 @@ def discover_roi_setups():
                 "cam_name": cam_name,
                 "seat_rois": [],
                 "monitor_rois": [],
-                "row_zone_rois": [],
+                "gate_rois": [],
                 "seat_csv": None,
                 "monitor_csv": None,
-                "row_zone_csv": None,
+                "gate_csv": None,
             }
         setups[cam_name]["seat_rois"] = rois
         setups[cam_name]["seat_csv"] = csv_path
@@ -555,15 +558,15 @@ def discover_roi_setups():
                 "cam_name": cam_name,
                 "seat_rois": [],
                 "monitor_rois": [],
-                "row_zone_rois": [],
+                "gate_rois": [],
                 "seat_csv": None,
                 "monitor_csv": None,
-                "row_zone_csv": None,
+                "gate_csv": None,
             }
         setups[cam_name]["monitor_rois"] = rois
         setups[cam_name]["monitor_csv"] = csv_path
 
-    for csv_path in row_zone_files:
+    for csv_path in gate_files:
         cam_name, _ = parse_cam_name_and_type(csv_path)
         rois = load_roi_csv(csv_path)
         if cam_name not in setups:
@@ -571,13 +574,13 @@ def discover_roi_setups():
                 "cam_name": cam_name,
                 "seat_rois": [],
                 "monitor_rois": [],
-                "row_zone_rois": [],
+                "gate_rois": [],
                 "seat_csv": None,
                 "monitor_csv": None,
-                "row_zone_csv": None,
+                "gate_csv": None,
             }
-        setups[cam_name]["row_zone_rois"] = rois
-        setups[cam_name]["row_zone_csv"] = csv_path
+        setups[cam_name]["gate_rois"] = rois
+        setups[cam_name]["gate_csv"] = csv_path
 
     gt_summaries = discover_groundtruth_summaries()
     for cam_name, setup in setups.items():
@@ -602,15 +605,15 @@ def draw_overlay(frame, setup, cam_idx, total):
     cam_name = setup["cam_name"]
     seat_rois = setup.get("seat_rois", [])
     monitor_rois = setup.get("monitor_rois", [])
-    row_zone_rois = setup.get("row_zone_rois", [])
+    gate_rois = setup.get("gate_rois", [])
     gt_summary = setup.get("gt_summary")
     gt_by_pc = gt_summary.get("by_pc", {}) if gt_summary else {}
-    pc_to_row = build_pc_to_row_map(seat_rois)
+    pc_to_gate = build_pc_to_gate_map(seat_rois)
 
     cam_index = CAM_NAME_TO_INDEX.get(cam_name, "?")
     header = (
         f"Camera {cam_idx + 1}/{total}: {cam_name} (index {cam_index}) | "
-        f"Seat ROI: {len(seat_rois)} | Monitor ROI: {len(monitor_rois)} | Row Zone: {len(row_zone_rois)}"
+        f"Seat ROI: {len(seat_rois)} | Monitor ROI: {len(monitor_rois)} | Gate ROI: {len(gate_rois)}"
     )
     cv2.putText(canvas, header, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, TITLE_COLOR, 2)
 
@@ -633,7 +636,7 @@ def draw_overlay(frame, setup, cam_idx, total):
             cv2.polylines(canvas, [poly], True, SEAT_POLY_COLOR, 2)
 
             label_anchor = tuple(ordered[0])
-            row_label = pc_to_row.get(roi["pc_name"], "ROW?")
+            gate_label = pc_to_gate.get(roi["pc_name"], "GATE?")
             gt_seconds = None
             if roi["pc_name"] in gt_by_pc:
                 gt_seconds = float(gt_by_pc[roi["pc_name"]].get("occupied_time_sec", 0.0))
@@ -641,7 +644,7 @@ def draw_overlay(frame, setup, cam_idx, total):
             seat_only_text = f"Seat{seat_index}"
             cv2.putText(canvas, seat_only_text, label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.6, SEAT_POLY_COLOR, 2)
 
-            segments = seat_display_segments(seat_index, roi["pc_name"], row_label, gt_seconds)
+            segments = seat_display_segments(seat_index, roi["pc_name"], gate_label, gt_seconds)
             draw_text_segments(canvas, (10, y), segments, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             y += 20
 
@@ -657,20 +660,20 @@ def draw_overlay(frame, setup, cam_idx, total):
             cv2.putText(canvas, label_text, label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.6, MONITOR_POLY_COLOR, 2)
             y += 20
 
-    if row_zone_rois:
+    if gate_rois:
         zone_color = (255, 255, 0)
         y += 24
-        for roi in row_zone_rois:
+        for roi in gate_rois:
             ordered = normalize_quad(roi["points"])
             poly = np.array(ordered, dtype=np.int32).reshape((-1, 1, 2))
             cv2.polylines(canvas, [poly], True, zone_color, 2)
 
             label_anchor = tuple(ordered[0])
-            label_text = f"Zone | {roi['pc_name']}"
+            label_text = f"Gate | {roi['pc_name']}"
             cv2.putText(canvas, label_text, label_anchor, cv2.FONT_HERSHEY_SIMPLEX, 0.6, zone_color, 2)
             y += 20
 
-    if not seat_rois and not monitor_rois and not row_zone_rois:
+    if not seat_rois and not monitor_rois and not gate_rois:
         cv2.putText(canvas, "No ROI found for this camera.", (10, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.7, TEXT_COLOR, 2)
 
     return canvas

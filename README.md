@@ -32,8 +32,6 @@ YOLOv8-based people detection with PC/seat usage logic for both live cameras and
 - Smoothed PC availability state (same mode-window idea)
 - Detection schedule gating (live mode)
 - Session performance summary logging
-- Row zone reconciliation (raw vs reconciled people count)
-- Per-row flow summaries (`row_flow_summary_*.csv`)
 - Simplified eval summary schema with occupied/count accuracy percent
 - Unified ROI setup/view-edit tooling (`tool/roi_setup.py`, `tool/roi_conf.py`)
 
@@ -101,7 +99,7 @@ python tool\roi_conf.py
 
 Notes:
 
-- In `tool/roi_setup.py`, set `SETUP_MODE` to one of: `seat`, `monitor`, `row_zone`.
+- In `tool/roi_setup.py`, set `SETUP_MODE` to one of: `seat`, `monitor`, `gate`.
 - In `tool/roi_conf.py`, set `MODE` to `edit` or `view`.
 
 ### 4) Label groundtruth for eval
@@ -297,7 +295,7 @@ Naming:
 
 - Seat ROI: `{CameraOrSourceLabel}_roi.csv`
 - Monitor ROI: `{CameraOrSourceLabel}_monitor_roi.csv`
-- Row zone ROI: `{CameraOrSourceLabel}_row_zone_roi.csv`
+- Gate ROI: `{CameraOrSourceLabel}_gate_roi.csv`
 
 CSV format:
 
@@ -347,53 +345,42 @@ Groundtruth files use the same camera label naming convention and should include
 - Summary location:
     - `logs_video_mode/eval/eval_summary_duration_based.csv`
 
-### Row Zone Reconciliation Logic
+### Gate ROI Logic
 
 Added in `tool/threaded_video_mode.py` with config keys in `tool/threaded_config.yaml`:
 
 ```yaml
-ROW_ZONE_CSV_SUFFIX: _row_zone_roi.csv
-ENABLE_ROW_RECONCILIATION: true
-ROW_RELINK_MAX_MISSING_SEC: 3.0
-ROW_SUDDEN_APPEAR_WINDOW_SEC: 4.0
+GATE_ROI_CSV_SUFFIX: _gate_roi.csv
 ```
 
 Behavior:
 
-- Row-based enter/exit tracking
-- Re-linking short occlusions in same row (`<= ROW_RELINK_MAX_MISSING_SEC`)
-- Sudden appearance correction when observed row count exceeds flow balance
-- Raw and reconciled counts tracked in parallel
-- Per-row flow report output: `row_flow_summary_*.csv`
+- Gate ROI marks camera entrance/exit regions.
+- If a tracked person reaches gate ROI and then disappears, it is treated as a normal exit.
+- Normal exit via gate suppresses hold boxes and disappearance snapshots for that track.
 
 ### Detection Pipeline Integration
 
 `camera_thread_fn` now:
 
-- Loads row-zone ROIs when reconciliation is enabled
-- Tracks row membership transitions per person
-- Applies occlusion re-link and sudden-appearance correction
-- Displays `Raw/Reconciled: X/Y` on screen when enabled
+- Loads gate ROIs when available
+- Uses gate-hit disappearance rule for normal exits
+- Skips hold/snapshot reporting for gate exits
 
-`collect_detection_rows` now includes:
+### How To Use Gate ROI
 
-- `raw_people_count_pred`
-- `reconciled_people_count_pred`
-
-### How To Use Row Reconciliation
-
-1. Define row zones:
+1. Define gate zones:
 
 ```powershell
 python tool\roi_setup.py
 ```
 
-Set `SETUP_MODE = "row_zone"` in `tool/roi_setup.py`, then click 4 points per camera.
+Set `SETUP_MODE = "gate"` in `tool/roi_setup.py`, then click 4 points per camera.
 
-2. Enable reconciliation in `tool/threaded_config.yaml`:
+2. Configure suffix in `tool/threaded_config.yaml`:
 
 ```yaml
-ENABLE_ROW_RECONCILIATION: true
+GATE_ROI_CSV_SUFFIX: _gate_roi.csv
 ```
 
 3. Run video mode:
@@ -404,14 +391,6 @@ python tool\threaded_video_mode.py --eval-only
 
 ### Output Files Added/Updated
 
-- Per-camera row flow summary:
-    - `logs_video_mode/<CAM_NAME>/row_flow_summary_<safe_cam_name>.csv`
-    - Columns include:
-        - `cam_name`, `row_name`, `enter_count_raw`, `exit_count_raw`
-        - `sudden_appear_count`, `reconcile_enter_adjust`
-        - `enter_count_reconciled`, `exit_count_reconciled`
-        - `row_balance_reconciled`, `raw_count_now`, `reconciled_count_now`
-
 - Updated eval summary:
     - `logs_video_mode/eval/eval_summary_duration_based.csv`
 
@@ -419,7 +398,4 @@ python tool\threaded_video_mode.py --eval-only
 
 | Key | Default | Purpose |
 |-----|---------|---------|
-| `ENABLE_ROW_RECONCILIATION` | `true` | Enable row zone tracking |
-| `ROW_ZONE_CSV_SUFFIX` | `_row_zone_roi.csv` | File suffix for row ROI CSVs |
-| `ROW_RELINK_MAX_MISSING_SEC` | `3.0` | Max occlusion duration to treat as continuous |
-| `ROW_SUDDEN_APPEAR_WINDOW_SEC` | `4.0` | Window for sudden appearance correction |
+| `GATE_ROI_CSV_SUFFIX` | `_gate_roi.csv` | File suffix for gate ROI CSVs |

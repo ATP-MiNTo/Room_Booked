@@ -9,8 +9,8 @@ import numpy as np
 # Change this mode at the top when running this script:
 # - "seat": PC seat ROI polygons (PC1, PC2, ...)
 # - "monitor": monitor ROI polygons aligned to seat PC names
-# - "row_zone": full row polygons (ROW1, ROW2, ...)
-SETUP_MODE = "row_zone"
+# - "gate": gate polygons used for fallback zone assignment (GATE1, GATE2, ...)
+SETUP_MODE = "gate"
 
 # Source mode:
 # - "camera": read from physical cameras using CAM_INDEXES
@@ -39,7 +39,7 @@ REQUIRED_POINTS_PER_ROI = 4
 ROI_CONFIG_DIR = os.path.join("tool", "roi_config")
 SEAT_CSV_SUFFIX = "_roi.csv"
 MONITOR_CSV_SUFFIX = "_monitor_roi.csv"
-ROW_ZONE_CSV_SUFFIX = "_row_zone_roi.csv"
+GATE_CSV_SUFFIX = "_gate_roi.csv"
 
 WINDOW_PREFIX = "Unified ROI Setup"
 TEXT_COLOR = (255, 255, 255)
@@ -71,8 +71,8 @@ def csv_suffix_for_mode(mode):
         return SEAT_CSV_SUFFIX
     if mode == "monitor":
         return MONITOR_CSV_SUFFIX
-    if mode == "row_zone":
-        return ROW_ZONE_CSV_SUFFIX
+    if mode == "gate":
+        return GATE_CSV_SUFFIX
     raise ValueError(f"Unsupported setup mode: {mode}")
 
 
@@ -140,20 +140,20 @@ def load_pc_names_from_seat_roi(cam_name):
         return []
 
 
-def build_row_zone_names_from_seats(cam_name):
+def build_gate_names_from_seats(cam_name):
     seat_names = load_pc_names_from_seat_roi(cam_name)
     if not seat_names:
         return []
 
-    row_count = int(np.ceil(len(seat_names) / 3.0))
-    return [f"ROW{i}" for i in range(1, row_count + 1)]
+    gate_count = int(np.ceil(len(seat_names) / 3.0))
+    return [f"GATE{i}" for i in range(1, gate_count + 1)]
 
 
 def default_name_for_mode(mode, index):
     if mode in ("seat", "monitor"):
         return f"PC{index}"
-    if mode == "row_zone":
-        return f"ROW{index}"
+    if mode == "gate":
+        return f"GATE{index}"
     return f"ROI{index}"
 
 
@@ -187,15 +187,15 @@ def run_roi_for_camera(cam_idx, mode, source_mode):
             print(f"{cam_name}: loaded {len(target_names)} seat names for monitor alignment")
         else:
             print(f"{cam_name}: seat ROI not found, monitor mode will use sequential PC names")
-    elif mode == "row_zone":
-        target_names = build_row_zone_names_from_seats(cam_name)
+    elif mode == "gate":
+        target_names = build_gate_names_from_seats(cam_name)
         if target_names:
             print(
-                f"{cam_name}: enforcing row-zone rule from seat ROI "
-                f"({len(load_pc_names_from_seat_roi(cam_name))} seats -> {len(target_names)} rows, 3 seats/row)"
+                f"{cam_name}: enforcing gate grouping from seat ROI "
+                f"({len(load_pc_names_from_seat_roi(cam_name))} seats -> {len(target_names)} gates, 3 seats/gate)"
             )
         else:
-            print(f"{cam_name}: seat ROI not found, row_zone mode will use sequential ROW names")
+            print(f"{cam_name}: seat ROI not found, gate mode will use sequential GATE names")
 
     cap, video_path = open_capture_for_camera(cam_idx, cam_name, source_mode)
     if cap is None or not cap.isOpened():
@@ -329,7 +329,7 @@ def run_roi_for_camera(cam_idx, mode, source_mode):
 def main(setup_mode=None, source_mode=None):
     mode = (setup_mode or SETUP_MODE).strip().lower()
     source = (source_mode or SOURCE_MODE).strip().lower()
-    if mode not in {"seat", "monitor", "row_zone"}:
+    if mode not in {"seat", "monitor", "gate"}:
         raise ValueError(f"Unsupported SETUP_MODE: {mode}")
     if source not in {"camera", "video"}:
         raise ValueError(f"Unsupported SOURCE_MODE: {source}")
