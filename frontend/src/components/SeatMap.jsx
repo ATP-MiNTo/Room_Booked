@@ -1,28 +1,43 @@
-import { RiComputerFill, RiUserFill, RiCheckboxCircleFill } from "react-icons/ri"; // 👈 เพิ่ม RiCheckboxCircleFill เข้ามา
+import { RiComputerFill, RiUserFill, RiCheckboxCircleFill, RiLockFill, RiToolsFill } from "react-icons/ri"; 
 import '../styles/App.css'; 
 
-const Seat = ({ seatNumber, isSelected, isBooked, onClick }) => {
-  const isDisabled = isBooked;
+// เปลี่ยนมารับ statusData แทน isBooked เพื่อให้รู้ว่าทำไมถึงถูกล็อก
+const Seat = ({ seatNumber, isSelected, statusData, onClick }) => {
+  const isDisabled = !!statusData; // ถ้ามีข้อมูลแปลว่าถูกล็อก/จอง/เสีย
 
-  // 🟢 จัดการสัญลักษณ์และสีตามสถานะ
+  // จัดการสัญลักษณ์และสีตามหน้าตาแบบดั้งเดิม
   let IconComponent = RiComputerFill; // ค่าเริ่มต้น (ว่าง)
   let iconColor = "#555"; 
+  let tooltip = `โต๊ะหมายเลข ${seatNumber} (พร้อมใช้งาน)`;
 
-  if (isBooked) {
-    IconComponent = RiUserFill;       // จองแล้ว (รูปคน)
-    iconColor = "#ef4444";
+  if (statusData) {
+    if (statusData.status === 'booked') {
+      IconComponent = RiUserFill;       // จองแล้ว (รูปคน)
+      iconColor = "#ef4444";
+      tooltip = `โต๊ะ ${seatNumber}: ${statusData.reason}`;
+    } else if (statusData.status === 'locked') {
+      IconComponent = RiLockFill;       // ติดเรียน (แม่กุญแจ)
+      iconColor = "#9333ea";
+      tooltip = `โต๊ะ ${seatNumber}: ${statusData.reason}`;
+    } else if (statusData.status === 'broken') {
+      IconComponent = RiToolsFill;      // แจ้งซ่อม (ประแจ)
+      iconColor = "#9e9e9e";
+      tooltip = `โต๊ะ ${seatNumber}: ${statusData.reason}`;
+    }
   } else if (isSelected) {
     IconComponent = RiCheckboxCircleFill; // กำลังเลือก (รูปติ๊กถูก)
     iconColor = "#4CAF50";
+    tooltip = `กำลังเลือกโต๊ะ ${seatNumber}`;
   }
 
   return (
     <div 
       className="seat-item"
+      title={tooltip} // เพิ่ม Tooltip เพื่อโชว์ข้อความตอนเอาเมาส์ชี้
       onClick={isDisabled ? null : onClick} 
       style={{ 
         cursor: isDisabled ? 'not-allowed' : 'pointer', 
-        opacity: isBooked ? 0.6 : 1,
+        opacity: isDisabled ? 0.6 : 1,
         transition: 'transform 0.2s'
       }}
       onMouseEnter={(e) => !isDisabled && (e.currentTarget.style.transform = 'scale(1.1)')}
@@ -35,20 +50,21 @@ const Seat = ({ seatNumber, isSelected, isBooked, onClick }) => {
   );
 };
 
-const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [] }) => {
+// เปลี่ยนมารับ seatStatuses (Object) แทน bookedSeats (Array) ให้ตรงกับหน้า Booking.jsx
+const SeatMap = ({ onSelectSeat, selectedSeatId, seatStatuses = {} }) => {
   const seats = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, number: i + 1 }));
   
   const leftSideSeats = seats.filter(seat => (seat.id - 1) % 6 < 3);
   const rightSideSeats = seats.filter(seat => (seat.id - 1) % 6 >= 3);
 
   const renderSeat = (seat) => {
-    const isBooked = bookedSeats.some(booked => String(booked) === String(seat.number));
+    const statusData = seatStatuses[String(seat.number)];
     
     return (
       <Seat 
         key={seat.id} 
         seatNumber={seat.number} 
-        isBooked={isBooked} 
+        statusData={statusData} // ส่ง statusData เข้าไป
         isSelected={String(selectedSeatId) === String(seat.number)} 
         onClick={() => onSelectSeat(seat.number)}
       />
@@ -74,7 +90,7 @@ const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [] }) => {
         </div>
       </div>
 
-      {/* โซนคำอธิบายสัญลักษณ์ (อัปเดตไอคอนใหม่ให้ตรงกัน) */}
+      {/* โซนคำอธิบายสัญลักษณ์ (อัปเดตไอคอนใหม่ให้ตรงกันและครบทุกสถานะ) */}
       <div style={{ 
           display: 'flex', 
           justifyContent: 'center', 
@@ -91,12 +107,20 @@ const SeatMap = ({ onSelectSeat, selectedSeatId, bookedSeats = [] }) => {
               <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>ว่าง</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <RiCheckboxCircleFill color="#4CAF50" size={20} /> {/* 👈 เปลี่ยนไอคอนตรงนี้ */}
+              <RiCheckboxCircleFill color="#4CAF50" size={20} /> 
               <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>กำลังเลือก</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <RiUserFill color="#ef4444" size={20} /> 
               <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>จองแล้ว</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <RiLockFill color="#9333ea" size={20} /> 
+              <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>ติดเรียน/ล็อก</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <RiToolsFill color="#9e9e9e" size={20} /> 
+              <span style={{fontSize: '0.85rem', color: '#555', fontWeight: 'bold'}}>แจ้งซ่อม</span>
           </div>
       </div>
 

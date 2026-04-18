@@ -1,7 +1,4 @@
-version: '3.8'
-
 services:
-  # 1. Database Service
   db:
     image: postgres:15-alpine
     container_name: complab_db
@@ -12,8 +9,8 @@ services:
       - ./data/postgres_db:/var/lib/postgresql/data
     networks:
       - complab_network
+    restart: unless-stopped
 
-  # 2. Nginx Service (ยามหน้าประตู)
   nginx:
     image: nginx:latest
     container_name: complab_nginx
@@ -26,8 +23,8 @@ services:
       - backend
     networks:
       - complab_network
+    restart: unless-stopped
 
-  # 3. Backend Service (FastAPI)
   backend:
     build: ./backend
     container_name: complab_backend
@@ -41,20 +38,18 @@ services:
       - db
     networks:
       - complab_network
+    restart: unless-stopped
 
-  # 4. Frontend Service (React/Vite)
   frontend:
     build: ./frontend
     container_name: complab_frontend
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - "3000:80"
     depends_on:
       - backend
     networks:
       - complab_network
+    restart: unless-stopped
 
 networks:
   complab_network:

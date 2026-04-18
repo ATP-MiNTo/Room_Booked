@@ -1,24 +1,27 @@
+# Environment
+#.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Data & Images (ไม่ push รูปภาพและ DB จริงขึ้น Git)
+data/face_scanner/
+data/postgres_db/
+
 # Logs
-logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# OS
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
+
+# VSCode
+.vscode/
