@@ -2,12 +2,13 @@ import json
 import zipfile
 import io
 import os
-from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Query
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Query, Depends, Header
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from datetime import date, time, datetime
 from typing import Optional, List
 from database import get_db
+from security import get_password_hash, verify_token
 
 router = APIRouter()
 
@@ -44,7 +45,7 @@ class SemesterRequest(BaseModel):
     end_date: date
 
 @router.post("/api/system/semesters")
-def add_semester(req: SemesterRequest):
+def add_semester(req: SemesterRequest, admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -70,7 +71,7 @@ def add_semester(req: SemesterRequest):
         if conn: conn.close()
 
 @router.get("/api/system/semesters")
-def get_semesters():
+def get_semesters(admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -98,7 +99,7 @@ def get_semesters():
         if conn: conn.close()
 
 @router.delete("/api/system/semesters/{sem_id}")
-def delete_semester(sem_id: int):
+def delete_semester(sem_id: int, admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -135,7 +136,7 @@ class LockSeatRequest(BaseModel):
     admin_id: str
 
 @router.post("/api/system/lock-seats")
-def lock_seats(req: LockSeatRequest):
+def lock_seats(req: LockSeatRequest, admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -169,7 +170,7 @@ def lock_seats(req: LockSeatRequest):
         if conn: conn.close()
 
 @router.get("/api/system/schedules")
-def get_schedules():
+def get_schedules(admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -207,7 +208,7 @@ def get_schedules():
         if conn: conn.close()
 
 @router.delete("/api/system/schedules/{schedule_id}")
-def delete_schedule(schedule_id: int):
+def delete_schedule(schedule_id: int, admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -232,7 +233,7 @@ class BrokenReportRequest(BaseModel):
     admin_id: str
 
 @router.post("/api/system/report-broken")
-def report_broken(req: BrokenReportRequest):
+def report_broken(req: BrokenReportRequest, admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -257,7 +258,7 @@ class ResolveBrokenRequest(BaseModel):
     fixed_date: str 
 
 @router.post("/api/system/resolve-broken")
-def resolve_broken(req: ResolveBrokenRequest):
+def resolve_broken(req: ResolveBrokenRequest, admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -279,7 +280,7 @@ def resolve_broken(req: ResolveBrokenRequest):
         if conn: conn.close()
 
 @router.get("/api/system/broken-seats")
-def get_broken_seats():
+def get_broken_seats(admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -312,7 +313,7 @@ def get_broken_seats():
 # สำรองข้อมูล, นำเข้า (Migration) และ ประวัติ (Logs)
 # ==========================================
 @router.get("/api/system/backup")
-def backup_database(start_date: str = Query(...), end_date: str = Query(...), admin_id: str = Query(None)):
+def backup_database(start_date: str = Query(...), end_date: str = Query(...), admin_id: str = Query(None), admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -362,7 +363,6 @@ def backup_database(start_date: str = Query(...), end_date: str = Query(...), ad
 
         json_str = json.dumps(backup_data, ensure_ascii=False, indent=2, default=json_serial)
         
-        # 🟢 เพิ่ม Timestamp (วันที่_เวลา) เข้าไปที่ท้ายชื่อไฟล์
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_name_suffix = "all_time" if is_all_time else f"{start_date}_to_{end_date}"
         final_filename = f"complab_backup_{file_name_suffix}_{timestamp}.zip"
@@ -410,7 +410,7 @@ def backup_database(start_date: str = Query(...), end_date: str = Query(...), ad
         if conn: conn.close()
 
 @router.post("/api/system/migrate")
-async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str] = Form("unknown")):
+async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str] = Form("unknown"), admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -465,7 +465,7 @@ async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str]
         if conn: conn.close()
 
 @router.get("/api/system/logs")
-def get_system_logs():
+def get_system_logs(admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -516,18 +516,12 @@ class AdminUpdate(BaseModel):
     priority: int
 
 @router.get("/api/admins")
-def get_all_admins():
+def get_all_admins(admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
         conn = get_db()
         cur = conn.cursor()
-        
-        try:
-            cur.execute("ALTER TABLE admins ADD COLUMN priority INT DEFAULT 3;")
-            conn.commit()
-        except:
-            conn.rollback() 
             
         cur.execute("""
             SELECT staff_id, first_name, last_name, department, position, username, priority, created_at 
@@ -556,7 +550,7 @@ def get_all_admins():
         if conn: conn.close()
 
 @router.post("/api/admins")
-def create_admin(admin: AdminCreate):
+def create_admin(admin: AdminCreate, current_admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -567,10 +561,13 @@ def create_admin(admin: AdminCreate):
         if cur.fetchone():
             raise HTTPException(status_code=400, detail="รหัสพนักงาน หรือ Username นี้มีผู้ใช้งานแล้ว")
 
+        # ✅ Hash รหัสผ่านก่อน INSERT เข้า Database
+        hashed_pw = get_password_hash(admin.password)
+
         cur.execute("""
-            INSERT INTO admins (staff_id, first_name, last_name, department, position, username, password, priority)
+            INSERT INTO admins (staff_id, first_name, last_name, department, position, username, password_hash, priority)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (admin.staff_id, admin.first_name, admin.last_name, admin.department, admin.position, admin.username, admin.password, admin.priority))
+        """, (admin.staff_id, admin.first_name, admin.last_name, admin.department, admin.position, admin.username, hashed_pw, admin.priority))
         
         conn.commit()
         return {"message": "เพิ่มผู้ดูแลระบบสำเร็จ"}
@@ -585,7 +582,7 @@ def create_admin(admin: AdminCreate):
         if conn: conn.close()
 
 @router.put("/api/admins/{staff_id}")
-def update_admin(staff_id: str, admin: AdminUpdate):
+def update_admin(staff_id: str, admin: AdminUpdate, current_admin=Depends(verify_token)):
     conn = None
     cur = None
     try:
@@ -601,11 +598,13 @@ def update_admin(staff_id: str, admin: AdminUpdate):
             raise HTTPException(status_code=400, detail="Username นี้มีผู้ใช้อื่นใช้งานแล้ว")
 
         if admin.password and admin.password.strip() != "":
+            # ✅ Hash รหัสผ่านใหม่ก่อน UPDATE
+            hashed_pw = get_password_hash(admin.password)
             cur.execute("""
                 UPDATE admins 
-                SET first_name=%s, last_name=%s, department=%s, position=%s, username=%s, password=%s, priority=%s
+                SET first_name=%s, last_name=%s, department=%s, position=%s, username=%s, password_hash=%s, priority=%s
                 WHERE staff_id=%s
-            """, (admin.first_name, admin.last_name, admin.department, admin.position, admin.username, admin.password, admin.priority, staff_id))
+            """, (admin.first_name, admin.last_name, admin.department, admin.position, admin.username, hashed_pw, admin.priority, staff_id))
         else:
             cur.execute("""
                 UPDATE admins 
@@ -626,7 +625,7 @@ def update_admin(staff_id: str, admin: AdminUpdate):
         if conn: conn.close()
 
 @router.delete("/api/admins/{staff_id}")
-def delete_admin(staff_id: str):
+def delete_admin(staff_id: str, current_admin=Depends(verify_token)):
     conn = None
     cur = None
     try:

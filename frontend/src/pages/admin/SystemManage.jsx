@@ -11,8 +11,8 @@ import SeatGrid from '../../components/admin/SeatGrid';
 import { AccordionTrigger, AccordionBody } from '../../components/admin/Accordion';
 
 import { formatThaiDate, generateTimeOptions, DAY_NAMES_EN, THAI_DAYS_FULL } from '../../utils/dateUtils';
-// 🟢 นำเข้า UI Constants
 import { pageStyles, tableStyles, btnStyles } from '../../utils/uiConstants';
+import { authFetch } from '../../utils/authFetch';
 
 export default function SystemManage() {
   const currentAdminId = sessionStorage.getItem('adminId');
@@ -69,11 +69,12 @@ export default function SystemManage() {
   const fetchData = async () => {
     try {
       const [r0, r1, r2, r3] = await Promise.all([
-          fetch('/api/system/semesters'),
-          fetch('/api/system/schedules'),
-          fetch('/api/system/broken-seats'),
-          fetch('/api/admins')
+        authFetch('/api/system/semesters'),
+        authFetch('/api/system/schedules'),
+        authFetch('/api/system/broken-seats'),
+        authFetch('/api/admins')
       ]);
+      
       if (r0.ok) setSemestersList(await r0.json());
       if (r1.ok) setSchedules(await r1.json());
       if (r2.ok) setBrokenList(await r2.json());
@@ -100,10 +101,12 @@ export default function SystemManage() {
     if (!semData.start_date || !semData.end_date) {
         return Swal.fire('แจ้งเตือน', 'กรุณาระบุวันที่ให้ครบถ้วน', 'warning');
     }
-    const res = await fetch('/api/system/semesters', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(semData)
+    const res = await authFetch('/api/system/semesters', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify(semData) 
     });
+
     if (res.ok) {
         Swal.fire('สำเร็จ', 'บันทึกปีการศึกษาเรียบร้อย', 'success');
         setSemData({ academic_year: thaiYear, semester: '1', start_date: '', end_date: '' });
@@ -151,16 +154,17 @@ export default function SystemManage() {
     const isLockAll = (blockData.purpose === 'ตารางเรียน' || blockData.purpose === 'สอบ');
     if (!isLockAll && blockData.seat_nos.length === 0) return Swal.fire('แจ้งเตือน', 'กรุณาเลือกที่นั่งอย่างน้อย 1 ที่', 'warning');
 
-    const res = await fetch('/api/system/lock-seats', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...blockData,
+    const res = await authFetch('/api/system/lock-seats', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({
+        ...blockData,
           academic_year: finalYear, semester: finalSem,
           start_date: finalStartDate, end_date: finalEndDate,
           day_of_week: finalDayOfWeek,
           start_time: `${blockData.start_time}:00`, end_time: `${blockData.end_time}:00`,
           is_all_seats: isLockAll, admin_id: currentAdminId
-        })
+      }) 
     });
 
     if (res.ok) {
@@ -174,7 +178,7 @@ export default function SystemManage() {
   const handleDeleteSchedule = async (id) => {
     if (!canManageSystem) return;
     if ((await Swal.fire({ title: 'ยืนยันลบ?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#d33' })).isConfirmed) {
-        await fetch(`/api/system/schedules/${id}`, { method: 'DELETE' });
+        await authFetch(`/api/system/schedules/${id}`, { method: 'DELETE' });
         fetchData();
     }
   };
@@ -186,10 +190,12 @@ export default function SystemManage() {
     const note = [...selectedIssues, otherIssue].filter(i => i.trim()).join(', ');
     if (!note) return Swal.fire('แจ้งเตือน', 'กรุณาระบุอาการเสีย', 'warning');
     
-    const res = await fetch('/api/system/report-broken', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seat_no: brokenData.seat_no, note, admin_id: currentAdminId }),
+    const res = await authFetch('/api/system/report-broken', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ seat_no: brokenData.seat_no, note, admin_id: currentAdminId}) 
     });
+
     if (res.ok) {
         Swal.fire('สำเร็จ', 'บันทึกแจ้งเครื่องเสียเรียบร้อย', 'success');
         setBrokenData({ seat_no: null }); setSelectedIssues([]); setOtherIssue('');
@@ -208,10 +214,13 @@ export default function SystemManage() {
         preConfirm: () => document.getElementById('fixed-date').value || Swal.showValidationMessage('กรุณาเลือกวันที่')
     });
     if (selectedDate) {
-        await fetch('/api/system/resolve-broken', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ broken_id: brokenId, admin_id: currentAdminId, fixed_date: selectedDate })
+
+        await authFetch('/api/system/resolve-broken', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ broken_id: brokenId, admin_id: currentAdminId, fixed_date: selectedDate }) 
         });
+
         fetchData();
     }
   };
@@ -225,10 +234,12 @@ export default function SystemManage() {
         return Swal.fire('ข้อมูลไม่ครบ', 'กรุณากรอกรหัสพนักงาน ชื่อ Username และรหัสผ่าน', 'warning');
     }
     try {
-      const res = await fetch('/api/admins', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({...newAdmin, priority: parseInt(newAdmin.priority)})
+
+      const res = await authFetch('/api/admins', { 
+        method: 'POST',
+        body: JSON.stringify({...newAdmin, priority: parseInt(newAdmin.priority) })
       });
+
       const data = await res.json();
       if (res.ok) {
         Swal.fire({ icon: 'success', title: 'เพิ่มแอดมินสำเร็จ', showConfirmButton: false, timer: 1500 });
@@ -252,7 +263,7 @@ export default function SystemManage() {
       confirmButtonText: 'ใช่, ลบบัญชีเลย!'
     });
     if (confirm.isConfirmed) {
-      const res = await fetch(`/api/admins/${staffId}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/admins/${staffId}`, { method: 'DELETE' });
       if (res.ok) {
         Swal.fire({ icon: 'success', title: 'ลบข้อมูลสำเร็จ', showConfirmButton: false, timer: 1500 });
         fetchData();
@@ -284,9 +295,10 @@ export default function SystemManage() {
           return Swal.fire('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อ และ Username', 'warning');
       }
       try {
-          const res = await fetch(`/api/admins/${editingAdmin.staff_id}`, {
-              method: 'PUT', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({...editingAdmin, priority: parseInt(editingAdmin.priority)})
+
+          const res = await authFetch(`/api/admins/${editingAdmin.staff_id}`, { 
+            method: 'PUT', 
+            body: JSON.stringify({...editingAdmin, priority: parseInt(editingAdmin.priority)})
           });
           const data = await res.json();
           if (res.ok) {
@@ -353,7 +365,7 @@ export default function SystemManage() {
             {semestersList.map(s => (
                 <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', background: '#f8f9fa', marginTop: '5px', borderRadius: '6px' }}>
                     <span>ปี <b>{s.academic_year}</b> / <b>{s.semester}</b> ({formatThaiDate(s.start_date)} ถึง {formatThaiDate(s.end_date)})</span>
-                    {canManageSystem && <button onClick={() => fetch(`/api/system/semesters/${s.id}`, {method:'DELETE'}).then(fetchData)} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}><RiDeleteBinFill/></button>}
+                    {canManageSystem && <button onClick={() => authFetch(`/api/system/semesters/${s.id}`, {method:'DELETE'}).then(fetchData)} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}><RiDeleteBinFill/></button>}
                 </div>
             ))}
           </AccordionBody>
@@ -392,6 +404,14 @@ export default function SystemManage() {
                   </div>
               )}
 
+              {blockData.purpose === 'สอบ' && (
+                  <div style={f.row}>
+                    <div style={{...f.fg, flex: 2}}><label style={f.label}>ชื่อวิชา / รายวิชาสอบ</label><input type="text" placeholder="วิชา..." style={f.input} value={blockData.subject_name} onChange={e => setBlockData({ ...blockData, subject_name: e.target.value })} disabled={!canManageSystem} /></div>
+                    <div style={{...f.fg, flex: 1}}><label style={f.label}>Section</label><input type="text" placeholder="336A" maxLength="5" style={f.input} value={blockData.section} onChange={e => setBlockData({ ...blockData, section: e.target.value })} disabled={!canManageSystem} /></div>
+                    <div style={{...f.fg, flex: 2}}><label style={f.label}>ผู้คุมสอบ</label><input type="text" placeholder="ชื่อผู้คุมสอบ..." style={f.input} value={blockData.teacher_name} onChange={e => setBlockData({ ...blockData, teacher_name: e.target.value })} disabled={!canManageSystem} /></div>
+                  </div>
+              )}
+
               <div style={f.row}>
                 {blockData.purpose === 'ตารางเรียน' && (
                   <div style={f.fg}><label style={f.label}>วันในสัปดาห์</label>
@@ -426,7 +446,18 @@ export default function SystemManage() {
           <AccordionBody id="broken" openPanel={openPanel}>
             <form onSubmit={handleBrokenSubmit} style={f.form}>
               <div style={f.fg}><label style={f.label}>เลือกที่นั่ง</label>
-                <SeatGrid selectedArray={brokenData.seat_no ? [brokenData.seat_no] : []} onToggle={(num) => { if(canManageSystem) setBrokenData({ seat_no: num }) }} forceAll={false} activeColor="#dc3545" />
+                <SeatGrid 
+                  selectedArray={brokenData.seat_no ? [brokenData.seat_no] : []} 
+                  onToggle={(num) => { 
+                    if (!canManageSystem) return;
+                    const isBroken = brokenList.some(b => b.status === 'broken' && b.seat_no === num);
+                    if (isBroken) return;
+                    setBrokenData({ seat_no: num });
+                  }} 
+                  forceAll={false} 
+                  activeColor="#dc3545"
+                  disabledArray={brokenList.filter(b => b.status === 'broken').map(b => b.seat_no)}
+                />
               </div>
               <div style={f.fg}><label style={f.label}>อาการเสีย</label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -560,7 +591,10 @@ export default function SystemManage() {
                     <td style={tableStyles.td}>{getDayLabel(row.day_of_week)}</td>
                     <td style={tableStyles.td}>{row.start_time.slice(0,5)} - {row.end_time.slice(0,5)}</td>
                     <td style={tableStyles.td}>
-                        {row.subject_name !== '-' ? <b>{row.subject_name}</b> : <b>{row.purpose}</b>}
+                        {row.subject_name !== '-' 
+                          ? <><b>{row.subject_name}</b>{row.purpose === 'สอบ' && <span style={{ marginLeft: '6px', background: '#fff1f0', color: '#cf1322', padding: '1px 7px', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 'bold' }}>สอบ</span>}</>
+                          : <b>{row.purpose}</b>
+                        }
                         {row.section !== '-' && ` Sec.${row.section}`}<br/>
                         <small style={{color:'#888'}}>{row.teacher_name !== '-' ? `(${row.teacher_name})` : ''}</small>
                     </td>

@@ -8,8 +8,8 @@ import {
 } from 'react-icons/ri';
 import { formatThaiDate, generateTimeOptions, escapeCSV, downloadCSV, fmtDate } from '../../utils/dateUtils';
 import { MAJOR_OPTIONS, YEAR_OPTIONS, pageStyles, tableStyles, btnStyles } from '../../utils/uiConstants';
+import { authFetch } from '../../utils/authFetch';
 
-// 🟢 1. กำหนด URL ของ Backend (FastAPI)
 const BACKEND_URL = '';
 
 export default function BookingHistory() {
@@ -20,6 +20,36 @@ export default function BookingHistory() {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: null });
   const [isFilterOpen, setIsFilterOpen] = useState(true);
 
+  const [studentModal, setStudentModal] = useState(null);
+  const [studentHistory, setStudentHistory] = useState([]);
+  const [isStudentLoading, setIsStudentLoading] = useState(false);
+
+  const calculateTotalHours = (history) => {
+    let totalMins = 0;
+    history.forEach(log => {
+      if (log.start_time && log.end_time) {
+        const [sh, sm] = log.start_time.split(':').map(Number);
+        const [eh, em] = log.end_time.split(':').map(Number);
+        const diff = (eh * 60 + em) - (sh * 60 + sm);
+        if (diff > 0) totalMins += diff;
+      }
+    });
+    const hrs  = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    if (!hrs && !mins) return '0 ชั่วโมง';
+    return `${hrs ? hrs + ' ชม. ' : ''}${mins ? mins + ' นาที' : ''}`;
+  };
+
+  const openStudentModal = async (log) => {
+    setStudentModal(log);
+    setIsStudentLoading(true);
+    try {
+      const res = await authFetch(`/api/students/${log.student_id}/reservations`);
+      setStudentHistory(res.ok ? await res.json() : []);
+    } catch { setStudentHistory([]); }
+    setIsStudentLoading(false);
+  };
+
   const itemsPerPage = 10;
   const timeOptions = generateTimeOptions();
 
@@ -27,7 +57,7 @@ export default function BookingHistory() {
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch('/reservations');
+      const res = await authFetch('/reservations');
       if (res.ok) setLogs(await res.json());
     } catch (e) {
       console.error('fetchLogs error:', e);
@@ -241,7 +271,11 @@ export default function BookingHistory() {
                 <tr key={i}>
                   <td style={tableStyles.td}>{getStatusBadge(log.reserve_date, log.end_time)}</td>
                   <td style={tableStyles.td}>
-                    <div style={{ fontWeight: '700', color: '#2c3e50' }}>{log.student_id}</div>
+                    <div 
+                      style={{ fontWeight: '700', color: '#1677ff', cursor: 'pointer' }}
+                      onClick={() => openStudentModal(log)}
+                      title="คลิกเพื่อดูข้อมูลนักศึกษา"
+                    >{log.student_id}</div>
                     <div style={{ fontSize: '0.85rem', color: '#555' }}>{log.first_name} {log.last_name}</div>
                     <div style={{ fontSize: '0.75rem', color: '#aaa' }}>{log.major}</div>
                   </td>
@@ -303,9 +337,79 @@ export default function BookingHistory() {
         )}
       </div>
 
-      {/* Image modal */}
+      {/* Student Info Modal — เหมือน StudentInfo */}
+      {studentModal && (
+        <div style={pageStyles.modalBackdrop} onClick={() => setStudentModal(null)}>
+          <div style={{ ...pageStyles.modalContent, width: '900px', padding: '25px' }} onClick={e => e.stopPropagation()}>
+            <button style={pageStyles.closeModalBtn} onClick={() => setStudentModal(null)}><RiCloseLine size={24} /></button>
+            <h3 style={{ margin: '0 0 15px 0', color: '#2c3e50', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <RiHistoryFill color="#1677ff" /> Booking History: {studentModal.first_name} {studentModal.last_name}
+            </h3>
+
+            <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', flexWrap: 'wrap' }}>
+              {[
+                { label: 'รหัสนักศึกษา',    value: studentModal.student_id,                    border: '#1677ff', bg: '#f5f5f5', color: '#2c3e50' },
+                { label: 'สาขา',             value: studentModal.major,                         border: '#52c41a', bg: '#f5f5f5', color: '#2c3e50' },
+                { label: 'จำนวนการใช้งาน',  value: `${studentHistory.length} ครั้ง`,           border: '#faad14', bg: '#fffbe6', color: '#d48806' },
+                { label: 'เวลารวมทั้งหมด',  value: calculateTotalHours(studentHistory),        border: '#722ed1', bg: '#f9f0ff', color: '#531dab' },
+              ].map((info, i) => (
+                <div key={i} style={{ flex: 1, background: info.bg, padding: '12px 15px', borderRadius: '8px', borderLeft: `4px solid ${info.border}` }}>
+                  <div style={{ fontSize: '0.8rem', color: '#888' }}>{info.label}</div>
+                  <div style={{ fontWeight: 'bold', color: info.color, fontSize: '1.1rem' }}>{info.value}</div>
+                </div>
+              ))}
+            </div>
+
+            {isStudentLoading ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>กำลังโหลดข้อมูล...</div>
+            ) : (
+              <div style={{ maxHeight: '50vh', overflowY: 'auto', border: '1px solid #eee', borderRadius: '8px' }}>
+                <table style={tableStyles.table}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                    <tr>
+                      {['สถานะ', 'ที่นั่ง', 'วันที่จอง', 'เวลา', 'วัตถุประสงค์', 'รูปถ่ายยืนยัน'].map(h => (
+                        <th key={h} style={{ ...tableStyles.th, textAlign: h === 'ที่นั่ง' || h === 'รูปถ่ายยืนยัน' ? 'center' : 'left' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {studentHistory.length > 0 ? studentHistory.map((h, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                        <td style={tableStyles.td}>{getStatusBadge(h.reserve_date, h.start_time, h.end_time)}</td>
+                        <td style={{ ...tableStyles.td, textAlign: 'center', fontWeight: 'bold', color: '#1677ff' }}>{h.seat_id}</td>
+                        <td style={{ ...tableStyles.td, fontWeight: 'bold', color: '#444' }}>{formatThaiDate(h.reserve_date)}</td>
+                        <td style={tableStyles.td}>{h.start_time?.substring(0,5)} - {h.end_time?.substring(0,5)} น.</td>
+                        <td style={tableStyles.td}>{h.purpose}</td>
+                        <td style={{ ...tableStyles.td, textAlign: 'center' }}>
+                          {h.image_filename ? (
+                            <div
+                              style={pageStyles.imageThumbnail}
+                              onClick={() => setSelectedImage(`/data/face_scanner/${h.reserve_date}/${h.image_filename}`)}
+                              onMouseEnter={(e) => e.currentTarget.lastChild.style.opacity = 1}
+                              onMouseLeave={(e) => e.currentTarget.lastChild.style.opacity = 0}
+                            >
+                              <img src={`/data/face_scanner/${h.reserve_date}/${h.image_filename}`} alt="Face Scan" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.src = 'https://via.placeholder.com/50?text=No+Img'; }} />
+                              <div style={pageStyles.imageOverlay}><RiImageAddLine size={18} color="white" /></div>
+                            </div>
+                          ) : (
+                            <span style={{ color: '#ccc', fontSize: '0.85rem' }}>ไม่มีรูป</span>
+                          )}
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan="6" style={{ ...tableStyles.td, textAlign: 'center', padding: '30px', color: '#ccc' }}>ไม่พบประวัติการใช้งาน</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Image zoom modal */}
       {selectedImage && (
-        <div style={pageStyles.modalBackdrop} onClick={() => setSelectedImage(null)}>
+        <div style={{ ...pageStyles.modalBackdrop, zIndex: 10000 }} onClick={() => setSelectedImage(null)}>
           <div style={{ ...pageStyles.modalContent, padding: '5px', background: 'transparent', boxShadow: 'none' }} onClick={e => e.stopPropagation()}>
             <button style={{ ...pageStyles.closeModalBtn, top: '-15px', right: '-15px', background: 'white', borderRadius: '50%', padding: '5px' }} onClick={() => setSelectedImage(null)}>
               <RiCloseLine size={24} />

@@ -11,6 +11,7 @@ import {
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { formatThaiDate, escapeCSV, downloadCSV, fmtDate } from '../../utils/dateUtils';
 import { MAJOR_OPTIONS, YEAR_OPTIONS, COLORS_YEAR, pageStyles, tableStyles, btnStyles } from '../../utils/uiConstants';
+import { authFetch } from '../../utils/authFetch';
 
 export default function StudentInfo() {
   const [students, setStudents] = useState([]);
@@ -34,8 +35,8 @@ export default function StudentInfo() {
   const fetchStudentsAndYear = async () => {
     try {
       const [resStudents, resYear] = await Promise.all([
-        fetch('/api/students').then(r => r.ok ? r : fetch('/students')),
-        fetch('/api/current-academic-year'),
+        authFetch('/api/students'),
+        authFetch('/api/current-academic-year'),
       ]);
       if (resStudents.ok) setStudents(await resStudents.json());
       if (resYear.ok) {
@@ -86,11 +87,12 @@ export default function StudentInfo() {
 
   const saveEdit = async (studentId) => {
     try {
-      const res = await fetch(`/api/students/${studentId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editData),
+      const res = await authFetch(`/api/students/${studentId}`, { 
+        method: 'PUT', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(editData) 
       });
+
       if (res.ok) {
         Swal.fire({ icon: 'success', title: 'อัปเดตข้อมูลสำเร็จ', showConfirmButton: false, timer: 1500 });
         setEditingId(null);
@@ -115,7 +117,7 @@ export default function StudentInfo() {
     });
     if (!confirm.isConfirmed) return;
     try {
-      const res = await fetch(`/api/students/${studentId}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/students/${studentId}`, { method: 'DELETE' });
       if (res.ok) {
         Swal.fire({ icon: 'success', title: 'ลบข้อมูลสำเร็จ', showConfirmButton: false, timer: 1500 });
         fetchStudentsAndYear();
@@ -141,7 +143,7 @@ export default function StudentInfo() {
     setHistoryModalOpen(true);
     setIsHistoryLoading(true);
     try {
-      const res = await fetch(`/api/students/${student.student_id}/reservations`);
+      const res = await authFetch(`/api/students/${student.student_id}/reservations`);
       setStudentHistory(res.ok ? await res.json() : []);
     } catch {
       setStudentHistory([]);
@@ -149,12 +151,16 @@ export default function StudentInfo() {
     setIsHistoryLoading(false);
   };
 
-  const getStatusBadge = (logDate, logEndTime) => {
+  const getStatusBadge = (logDate, logStartTime, logEndTime) => {
     if (!logDate || !logEndTime) return <span style={pageStyles.badge}>-</span>;
-    const expired = new Date(`${logDate}T${logEndTime}`) < new Date();
-    return expired
-      ? <span style={{ ...pageStyles.badge, background: '#f5f5f5', color: '#888' }}>หมดเวลา</span>
-      : <span style={{ ...pageStyles.badge, background: '#e6f4ff', color: '#1677ff' }}>รอ/กำลังใช้งาน</span>;
+    const now   = new Date();
+    const start = new Date(`${logDate}T${logStartTime}`);
+    const end   = new Date(`${logDate}T${logEndTime}`);
+    if (now < start)
+      return <span style={{ ...pageStyles.badge, background: '#fffbe6', color: '#d48806' }}>รอใช้งาน</span>;
+    if (now >= start && now <= end)
+      return <span style={{ ...pageStyles.badge, background: '#f6ffed', color: '#389e0d' }}>กำลังใช้งาน</span>;
+    return <span style={{ ...pageStyles.badge, background: '#f5f5f5', color: '#888' }}>หมดเวลา</span>;
   };
 
   const calculateTotalHours = (history) => {
@@ -337,7 +343,7 @@ export default function StudentInfo() {
               {currentItems.map(std => (
                 <tr key={std.student_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td
-                    style={{ ...tableStyles.td, fontWeight: '700', color: '#1677ff', cursor: 'pointer', textDecoration: 'underline' }}
+                    style={{ ...tableStyles.td, fontWeight: '700', color: '#1677ff', cursor: 'pointer' }}
                     onClick={() => openHistoryModal(std)}
                     onMouseEnter={(e) => e.target.style.color = '#0958d9'}
                     onMouseLeave={(e) => e.target.style.color = '#1677ff'}
@@ -361,7 +367,7 @@ export default function StudentInfo() {
                     </>
                   ) : (
                     <>
-                      <td style={{ ...tableStyles.td, fontWeight: '700', color: '#2c3e50' }}>{std.first_name}</td>
+                      <td style={tableStyles.td}>{std.first_name}</td>
                       <td style={tableStyles.td}>{std.last_name}</td>
                       <td style={tableStyles.td}>{std.major}</td>
                       <td style={{ ...tableStyles.td, textAlign: 'center' }}>
@@ -436,7 +442,7 @@ export default function StudentInfo() {
                   <tbody>
                     {studentHistory.length > 0 ? studentHistory.map((history, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                        <td style={tableStyles.td}>{getStatusBadge(history.reserve_date, history.end_time)}</td>
+                        <td style={tableStyles.td}>{getStatusBadge(history.reserve_date, history.start_time, history.end_time)}</td>
                         <td style={{ ...tableStyles.td, textAlign: 'center', fontWeight: 'bold', color: '#1677ff' }}>{history.seat_id}</td>
                         <td style={{ ...tableStyles.td, fontWeight: 'bold', color: '#444' }}>{formatThaiDate(history.reserve_date)}</td>
                         <td style={tableStyles.td}>{history.start_time?.substring(0,5)} - {history.end_time?.substring(0,5)} น.</td>

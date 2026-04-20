@@ -10,6 +10,7 @@ import AdminLayout from '../../components/admin/AdminLayout';
 
 import { formatThaiDate, DAY_NAMES_EN } from '../../utils/dateUtils';
 import { btnStyles, pageStyles } from '../../utils/uiConstants';
+import { authFetch } from '../../utils/authFetch';
 
 export default function Monitor() {
   const [selectedSeat, setSelectedSeat] = useState(null);
@@ -31,8 +32,8 @@ export default function Monitor() {
     try {
       const [resBookings, resSchedules, resBroken] = await Promise.all([
         fetch('/reservations'),
-        fetch('/api/system/schedules'),
-        fetch('/api/system/broken-seats')
+        authFetch('/api/system/schedules'),
+        authFetch('/api/system/broken-seats')
       ]);
       
       if (resBookings.ok) setDbBookings(await resBookings.json());

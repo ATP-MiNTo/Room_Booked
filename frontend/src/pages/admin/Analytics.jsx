@@ -251,13 +251,46 @@ export default function Analytics() {
   const resetAdvancedFilters = () => setAdvancedFilters({ major: '', year_level: '' });
 
   const exportCSV = () => {
-    if (!allSeatsUsage.length) return;
-    const headers = ['อันดับ', 'หมายเลขเครื่อง', 'จำนวนการใช้งาน'];
-    const rows = [
-      headers.map(escapeCSV).join(','),
-      ...allSeatsUsage.map((seat, i) => [i+1, seat.name, seat.usage].map(escapeCSV).join(',')),
-    ];
-    downloadCSV(rows, `seat-usage-${timeFilter}-${fmtDate(new Date())}.csv`);
+    const rows = [];
+
+    // Section 1: KPI Summary
+    rows.push(['=== ภาพรวม KPI ==='].map(escapeCSV).join(','));
+    rows.push(['ประเภท', 'จำนวน (ครั้ง)'].map(escapeCSV).join(','));
+    rows.push(['จองและนั่ง',       kpiData.totalNormal  ?? 0].map(escapeCSV).join(','));
+    rows.push(['จองแต่ไม่มา',      kpiData.totalNoShow  ?? 0].map(escapeCSV).join(','));
+    rows.push(['ไม่จองแต่นั่ง',    kpiData.totalWalkin  ?? 0].map(escapeCSV).join(','));
+    rows.push(['เครื่องขัดข้อง',   kpiData.broken       ?? 0].map(escapeCSV).join(','));
+    rows.push(['']);
+
+    // Section 2: Seat Usage
+    if (allSeatsUsage.length) {
+      const total = allSeatsUsage.reduce((s, x) => s + x.usage, 0);
+      rows.push(['=== การใช้งานแต่ละเครื่อง ==='].map(escapeCSV).join(','));
+      rows.push(['อันดับ', 'หมายเลขเครื่อง', 'จำนวนการใช้งาน (ครั้ง)'].map(escapeCSV).join(','));
+      allSeatsUsage.forEach((seat, i) => {
+        rows.push([i + 1, seat.name, seat.usage].map(escapeCSV).join(','));
+      });
+      rows.push(['', 'รวม', total].map(escapeCSV).join(','));
+      rows.push(['']);
+    }
+
+    // Section 3: By Major
+    if (byMajor.length) {
+      rows.push(['=== สัดส่วนตามสาขา ==='].map(escapeCSV).join(','));
+      rows.push(['สาขา', 'จำนวน (คน/ครั้ง)'].map(escapeCSV).join(','));
+      byMajor.forEach(m => rows.push([m.major, m.total].map(escapeCSV).join(',')));
+      rows.push(['']);
+    }
+
+    // Section 4: Peak Hours
+    if (peakHours.length) {
+      rows.push(['=== ช่วงเวลายอดนิยม (Peak Hours) ==='].map(escapeCSV).join(','));
+      rows.push(['ช่วงเวลา', 'จำนวนผู้ใช้งาน'].map(escapeCSV).join(','));
+      peakHours.forEach(h => rows.push([h.time, h.users].map(escapeCSV).join(',')));
+      rows.push(['']);
+    }
+
+    downloadCSV(rows, `analytics-${timeFilter}-${fmtDate(new Date())}.csv`);
   };
 
   const renderPieTooltip = (value, name, props) => {

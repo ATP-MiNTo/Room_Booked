@@ -13,8 +13,8 @@ import {
 } from 'react-icons/ri';
 
 import { THAI_MONTHS_SHORT } from '../../utils/dateUtils';
-// 🟢 นำเข้า UI Constants
 import { pageStyles, tableStyles, btnStyles } from '../../utils/uiConstants';
+import { authFetch } from '../../utils/authFetch';
 
 export default function BackupRestore() {
   const currentAdminId = sessionStorage.getItem('adminId');
@@ -52,7 +52,7 @@ export default function BackupRestore() {
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch('/api/system/logs');
+      const res = await authFetch('/api/system/logs');
       if (res.ok) {
         const data = await res.json();
         setBackupHistory(data);
@@ -86,7 +86,7 @@ export default function BackupRestore() {
       });
 
       const adminParam = currentAdminId ? `&admin_id=${currentAdminId}` : '';
-      const res = await fetch(`/api/system/backup?start_date=${queryStart}&end_date=${queryEnd}${adminParam}`, { method: 'GET' });
+      const res = await authFetch(`/api/system/backup?start_date=${queryStart}&end_date=${queryEnd}${adminParam}`);
       
       if (res.ok) {
         const blob = await res.blob();
@@ -107,7 +107,7 @@ export default function BackupRestore() {
         fetchLogs(); 
       } else {
         const errData = await res.json().catch(() => ({ detail: "ไม่ทราบสาเหตุแน่ชัด" }));
-        Swal.fire('ข้อผิดพลาด', `Backend Error: ${errData.detail}`, 'error');
+        Swal.fire('ข้อผิดพลาด', `Backend Error: ${typeof errData.detail === 'string' ? errData.detail : 'ไม่ทราบสาเหตุ'}`, 'error');
       }
     } catch (error) {
       console.error(error);
@@ -144,9 +144,9 @@ export default function BackupRestore() {
         formData.append('file', restoreFile);
         formData.append('admin_id', currentAdminId || 'unknown');
 
-        const res = await fetch('/api/system/migrate', {
-          method: 'POST',
-          body: formData
+        const res = await authFetch('/api/system/migrate', { 
+          method: 'POST', 
+          body: formData 
         });
 
         if (res.ok) {
@@ -157,7 +157,7 @@ export default function BackupRestore() {
           });
         } else {
           const errData = await res.json().catch(() => ({ detail: "ไฟล์เสียหาย" }));
-          Swal.fire('ข้อผิดพลาด', `การนำเข้าล้มเหลว: ${errData.detail}`, 'error');
+          Swal.fire('ข้อผิดพลาด', `การนำเข้าล้มเหลว: ${typeof errData.detail === 'string' ? errData.detail : 'ไม่ทราบสาเหตุ'}`, 'error');
         }
       } catch (error) {
         Swal.fire('ข้อผิดพลาด', 'ไม่สามารถติดต่อเซิร์ฟเวอร์ได้', 'error');

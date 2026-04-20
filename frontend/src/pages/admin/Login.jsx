@@ -32,7 +32,7 @@ export default function Login() {
         navigate('/admin/monitor');
       } else {
         const errorData = await response.json();
-        setErrorMessage(errorData.detail || 'ชื่อผู้ใช้งาน หรือรหัสผ่านไม่ถูกต้อง');
+        setErrorMessage(typeof errorData.detail === 'string' ? errorData.detail : 'ชื่อผู้ใช้งาน หรือรหัสผ่านไม่ถูกต้อง');
       }
     } catch (error) {
       setErrorMessage('ไม่สามารถติดต่อเซิร์ฟเวอร์ได้ กรุณาลองใหม่อีกครั้ง');

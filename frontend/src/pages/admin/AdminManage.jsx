@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import AdminLayout from '../../components/admin/AdminLayout';
+import { authFetch } from '../../utils/authFetch';
 import Swal from 'sweetalert2';
 import { 
   RiSearchLine, 
@@ -26,7 +27,7 @@ export default function AdminManage() {
 
   const fetchAdmins = async () => {
     try {
-      const response = await fetch('/api/admins');
+      const response = await authFetch('/api/admins');
       const res = response.ok ? response : await fetch('/admins');
       if (res.ok) {
         const data = await res.json();
@@ -50,11 +51,12 @@ export default function AdminManage() {
     }
 
     try {
-      const res = await fetch('/api/admins', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAdmin)
+      const res = await authFetch('/api/admins', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(newAdmin) 
       });
+
       
       const data = await res.json();
       
@@ -64,7 +66,7 @@ export default function AdminManage() {
         setNewAdmin({ staff_id: '', first_name: '', last_name: '', department: '', position: '', username: '', password: '' });
         fetchAdmins();
       } else {
-        Swal.fire('ข้อผิดพลาด', data.detail || 'ไม่สามารถเพิ่มแอดมินได้', 'error');
+        Swal.fire('ข้อผิดพลาด', typeof data.detail === 'string' ? data.detail : 'ไม่สามารถเพิ่มแอดมินได้', 'error');
       }
     } catch (e) {
       Swal.fire('ข้อผิดพลาด', 'ติดต่อเซิร์ฟเวอร์ไม่ได้', 'error');
@@ -89,7 +91,7 @@ export default function AdminManage() {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await fetch(`/api/admins/${staffId}`, { method: 'DELETE' });
+        const res = await authFetch(`/api/admins/${staffId}`, { method: 'DELETE' });
         if (res.ok) {
           Swal.fire({ icon: 'success', title: 'ลบข้อมูลสำเร็จ', showConfirmButton: false, timer: 1500 });
           fetchAdmins();

@@ -7,9 +7,9 @@ import {
 } from 'react-icons/ri';
 import AdminLayout from '../../components/admin/AdminLayout';
 
-// 🟢 นำเข้า DAY_NAMES_EN และสไตล์จากส่วนกลาง
 import { formatThaiDate, DAY_NAMES_EN } from '../../utils/dateUtils';
 import { btnStyles, pageStyles } from '../../utils/uiConstants';
+import { authFetch } from '../../utils/authFetch';
 
 export default function MonitorMock() {
   const [selectedSeatNum, setSelectedSeatNum] = useState(null);
@@ -41,9 +41,9 @@ export default function MonitorMock() {
     const fetchAllData = async () => {
       try {
         const [resBookings, resSchedules, resBroken] = await Promise.all([
-          fetch('/api/reservations').then(res => res.ok ? res : fetch('/reservations')),
-          fetch('/api/system/schedules'),
-          fetch('/api/system/broken-seats')
+            fetch('/reservations'),
+            authFetch('/api/system/schedules'),
+            authFetch('/api/system/broken-seats')
         ]);
         
         if (resBookings.ok) setDbBookings(await resBookings.json());

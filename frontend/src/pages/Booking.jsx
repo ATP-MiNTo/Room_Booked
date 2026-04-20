@@ -136,7 +136,7 @@ function Booking() {
             });
         } else {
             const errorData = await response.json();
-            Swal.fire({ title: 'เกิดข้อผิดพลาด', text: errorData.detail, icon: 'error', confirmButtonText: 'ตกลง', confirmButtonColor: '#d33' });
+            Swal.fire({ title: 'เกิดข้อผิดพลาด', text: typeof errorData.detail === 'string' ? errorData.detail : 'เกิดข้อผิดพลาด', icon: 'error', confirmButtonText: 'ตกลง', confirmButtonColor: '#d33' });
         }
     } catch (error) {
         console.error("Error saving to DB:", error);
