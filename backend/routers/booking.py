@@ -52,7 +52,7 @@ def get_current_academic_year_helper(cur):
 def get_year_level(student_id, current_year):
     student_id = str(student_id).strip()
     if len(student_id) != 10 or not student_id.startswith('1') or not student_id.isdigit():
-        return "Error (เลขแปลกๆ)"
+        return "Error"
     try:
         entry_year = 2500 + int(student_id[1:3])
         yl = current_year - entry_year + 1
@@ -61,10 +61,10 @@ def get_year_level(student_id, current_year):
         elif yl == 3: return "ปี 3"
         elif yl == 4: return "ปี 4"
         elif 5 <= yl <= 9: return "ปี 5++"
-        elif yl >= 10: return "รีไทร์ (เกิน 10 ปี)"
-        else: return "Error (เลขแปลกๆ)"
+        elif yl >= 10: return "รีไทร์"
+        else: return "Error"
     except:
-        return "Error (เลขแปลกๆ)"
+        return "Error"
 
 @router.get("/api/current-academic-year")
 def api_get_current_academic_year():
@@ -609,7 +609,7 @@ def get_by_year(start: str = Query(None), end: str = Query(None), month: str = Q
         rows = cur.fetchall()
 
         current_academic_year = get_current_academic_year_helper(cur)
-        year_counts = {"ปี 1": 0, "ปี 2": 0, "ปี 3": 0, "ปี 4": 0, "ปี 5++": 0, "รีไทร์ (เกิน 10 ปี)": 0, "Error (เลขแปลกๆ)": 0}
+        year_counts = {"ปี 1": 0, "ปี 2": 0, "ปี 3": 0, "ปี 4": 0, "ปี 5++": 0, "รีไทร์": 0, "Error": 0}
 
         for row in rows:
             student_id = str(row[0]).strip()
@@ -618,10 +618,10 @@ def get_by_year(start: str = Query(None), end: str = Query(None), month: str = Q
             if yl_text in year_counts:
                 year_counts[yl_text] += count
             else:
-                year_counts["Error (เลขแปลกๆ)"] += count
+                year_counts["Error"] += count
 
         result = [{"year": k, "total": v} for k, v in year_counts.items() if v > 0]
-        order = {"ปี 1":1, "ปี 2":2, "ปี 3":3, "ปี 4":4, "ปี 5++":5, "รีไทร์ (เกิน 10 ปี)":6, "Error (เลขแปลกๆ)":7}
+        order = {"ปี 1":1, "ปี 2":2, "ปี 3":3, "ปี 4":4, "ปี 5++":5, "รีไทร์":6, "Error":7}
         result.sort(key=lambda x: order.get(x["year"], 99))
         return result
     except Exception as e:

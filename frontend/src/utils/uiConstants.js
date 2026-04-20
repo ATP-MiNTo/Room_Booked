@@ -23,8 +23,8 @@ export const YEAR_OPTIONS = [
   { value: 'ปี 3', label: 'ชั้นปี 3' },
   { value: 'ปี 4', label: 'ชั้นปี 4' },
   { value: 'ปี 5++', label: 'ชั้นปี 5++' },
-  { value: 'รีไทร์ (เกิน 10 ปี)', label: 'รีไทร์ (เกิน 10 ปี)' },
-  { value: 'Error (เลขแปลกๆ)', label: 'Error (รหัสไม่ถูกต้อง)' },
+  { value: 'รีไทร์', label: 'รีไทร์' },
+  { value: 'Error', label: 'Error' },
 ];
 
 export const btnStyles = {
@@ -73,10 +73,10 @@ export const tableStyles = {
 
 export const pageStyles = {
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px' },
-  title: { fontSize: '1.6rem', fontWeight: '700', color: '#2c3e50', margin: 0, display: 'flex', alignItems: 'center', gap: '10px' },
-  card: { background: 'white', padding: '25px', borderRadius: '15px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', border: '1px solid #f1f5f9' },
+  title: { fontSize: 'clamp(1.1rem, 4vw, 1.6rem)', fontWeight: '700', color: '#2c3e50', margin: 0, display: 'flex', alignItems: 'center', gap: '10px' },
+  card: { background: 'white', padding: 'clamp(15px, 3vw, 25px)', borderRadius: '15px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', border: '1px solid #f1f5f9' },
   pagination: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', padding: '10px 15px', background: 'white', borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' },
-  pageBtn: { display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 12px', backgroundColor: '#f0f2f5', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#2c3e50', fontWeight: '700', fontSize: '0.9rem' },
+  pageBtn: { display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 14px', backgroundColor: '#f0f2f5', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: 'pointer', color: '#2c3e50', fontWeight: '700', fontSize: '0.9rem' },
   badge: { padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 'bold', display: 'inline-block', whiteSpace: 'nowrap' },
   imageThumbnail: { width: '45px', height: '45px', borderRadius: '6px', overflow: 'hidden', cursor: 'pointer', position: 'relative', border: '1px solid #eee', backgroundColor: '#fafafa', margin: '0 auto' },
   imageOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', opacity: 0, transition: 'opacity 0.2s' },

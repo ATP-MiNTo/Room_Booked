@@ -20,9 +20,9 @@ const SeatGrid = ({ selectedArray, onToggle, forceAll, activeColor, disabledArra
               fontWeight: '700', fontSize: '0.9rem',
               cursor: forceAll || disabled ? 'not-allowed' : 'pointer',
               userSelect: 'none',
-              background: disabled ? '#ff4d4f' : on ? activeColor : 'white',
-              color: disabled || on ? 'white' : '#64748b',
-              border: disabled ? '1px solid #ff4d4f' : on ? `1px solid ${activeColor}` : '1px solid #cbd5e1',
+              background: disabled ? '#d9d9d9' : on ? activeColor : 'white',
+              color: disabled ? '#999' : on ? 'white' : '#64748b',
+              border: disabled ? '1px solid #bfbfbf' : on ? `1px solid ${activeColor}` : '1px solid #cbd5e1',
               opacity: forceAll ? 0.6 : 1,
               transition: 'all 0.15s',
               boxShadow: on ? '0 2px 4px rgba(0,0,0,0.1)' : 'none'

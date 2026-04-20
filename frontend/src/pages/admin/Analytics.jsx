@@ -310,7 +310,7 @@ export default function Analytics() {
     const isBad = title.includes('ไม่');
     const tColor = isPos ? (isBad ? '#cf1322' : '#389e0d') : (isBad ? '#389e0d' : '#cf1322');
     return (
-      <div style={{ background: 'white', padding: '20px', borderRadius: '15px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', flex: '1 1 200px', border: `1px solid ${bgColor}` }}>
+      <div style={{ background: 'white', padding: '20px', borderRadius: '15px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', flex: '1 1 140px', minWidth: 0, border: `1px solid ${bgColor}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <div style={{ fontSize: '0.9rem', color: '#64748b', fontWeight: 'bold' }}>{title}</div>
@@ -342,8 +342,8 @@ export default function Analytics() {
           </div>
         </div>
 
-        <div style={{ background: 'white', borderRadius: '14px', padding: '16px 20px', marginBottom: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: '10px', padding: '4px' }}>
+        <div style={{ background: 'white', borderRadius: '14px', padding: '12px 16px', marginBottom: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: '10px', padding: '4px', alignSelf: 'flex-start' }}>
             {Object.entries(filterLabel).map(([key, label]) => (
               <button
                 key={key}
@@ -354,7 +354,6 @@ export default function Analytics() {
               </button>
             ))}
           </div>
-          <div style={{ height: '28px', width: '1px', background: '#e2e8f0', flexShrink: 0 }} />
           <DateRangeSelector {...currentDateSelector} />
         </div>
 
@@ -411,6 +410,25 @@ export default function Analytics() {
               <StatCard title="เครื่องขัดข้อง"  value={kpiData.broken}       icon={<RiToolsFill size={24}/>}       color={STATUS_COLORS.broken} bgColor="#f1f5f9"/>
             </div>
 
+            <div style={{ ...pageStyles.card, background: '#fff1f0', border: '1px solid #ffa39e', marginBottom: '30px' }}>
+                <h3 style={{ ...styles.cardTitle, color: '#cf1322' }}><RiAlertFill /> เครื่องที่แจ้งขัดข้อง ({kpiData.broken || 0})</h3>
+                {brokenSeatsList.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
+                    {brokenSeatsList.map((item, i) => (
+                      <div key={i} style={{ background: 'white', padding: '10px 14px', borderRadius: '8px', borderLeft: '4px solid #cf1322', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{item.seat_no}</div>
+                          <div style={{ color: '#64748b', fontSize: '0.82rem', marginTop: '2px' }}>{item.note}</div>
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: '#94a3b8', flexShrink: 0 }}>{formatThaiDate(item.date)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffa39e', fontWeight: 'bold' }}>ไม่มีเครื่องขัดข้อง</div>
+                )}
+              </div>
+
             <div style={{ ...pageStyles.card, marginBottom: '30px' }}>
               <h3 style={styles.cardTitle}><RiCalendar2Line color="#64748b" /> แนวโน้มการใช้งาน
                 <span style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>({filterLabel[timeFilter]})</span>
@@ -431,7 +449,7 @@ export default function Analytics() {
               ) : <EmptyChart h={300} />}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '20px', marginTop: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '20px' }}>
 
               <div style={{ ...pageStyles.card, display: 'flex', flexDirection: 'column' }}>
                 <h3 style={styles.cardTitle}><RiComputerLine color="#1677ff" /> สถิติการใช้งานที่นั่ง</h3>
@@ -533,25 +551,6 @@ export default function Analytics() {
                     </div>
                   </>
                 ) : <EmptyChart h={200} />}
-              </div>
-
-              <div style={{ ...pageStyles.card, background: '#fff1f0', border: '1px solid #ffa39e', gridColumn: '1 / -1' }}>
-                <h3 style={{ ...styles.cardTitle, color: '#cf1322' }}><RiAlertFill /> เครื่องที่แจ้งขัดข้อง ({kpiData.broken || 0})</h3>
-                {brokenSeatsList.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
-                    {brokenSeatsList.map((item, i) => (
-                      <div key={i} style={{ background: 'white', padding: '10px 14px', borderRadius: '8px', borderLeft: '4px solid #cf1322', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontWeight: 'bold', color: '#1e293b' }}>{item.seat_no}</div>
-                          <div style={{ color: '#64748b', fontSize: '0.82rem', marginTop: '2px' }}>{item.note}</div>
-                        </div>
-                        <div style={{ fontSize: '0.78rem', color: '#94a3b8', flexShrink: 0 }}>{formatThaiDate(item.date)}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffa39e', fontWeight: 'bold' }}>ไม่มีเครื่องขัดข้อง</div>
-                )}
               </div>
 
             </div>

@@ -365,7 +365,7 @@ export default function SystemManage() {
             {semestersList.map(s => (
                 <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', background: '#f8f9fa', marginTop: '5px', borderRadius: '6px' }}>
                     <span>ปี <b>{s.academic_year}</b> / <b>{s.semester}</b> ({formatThaiDate(s.start_date)} ถึง {formatThaiDate(s.end_date)})</span>
-                    {canManageSystem && <button onClick={() => authFetch(`/api/system/semesters/${s.id}`, {method:'DELETE'}).then(fetchData)} style={{ color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}><RiDeleteBinFill/></button>}
+                    {canManageSystem && <button onClick={() => authFetch(`/api/system/semesters/${s.id}`, {method:'DELETE'}).then(fetchData)} style={{border:'none', background:'#fff1f0', color:'#cf1322', padding:'8px', margin:'0 3px', borderRadius:'6px', cursor:'pointer', display:'inline-flex'}}><RiDeleteBinFill size={16}/></button>}
                 </div>
             ))}
           </AccordionBody>
@@ -376,7 +376,7 @@ export default function SystemManage() {
           <AccordionBody id="block" openPanel={openPanel}>
             <form onSubmit={handleBlockSubmit} style={f.form}>
               <div style={f.row}>
-                <div style={f.fg}><label style={f.label}>วัตถุประสงค์</label>
+                <div style={{...f.fg, flex: '0 0 auto', minWidth: '120px', maxWidth: '145px'}}><label style={f.label}>วัตถุประสงค์</label>
                   <select style={f.input} value={blockData.purpose} onChange={e => setBlockData({ ...blockData, purpose: e.target.value, seat_nos: [] })} disabled={!canManageSystem}>
                     {purposeOptions.map(p => <option key={p.value} value={p.value}>{p.value}</option>)}
                   </select>
@@ -497,24 +497,26 @@ export default function SystemManage() {
                 <form onSubmit={handleAddAdmin} style={f.form}>
                     <div style={f.row}>
                         <div style={f.fg}><label style={f.label}>รหัสพนักงาน *</label><input type="text" name="staff_id" value={newAdmin.staff_id} onChange={handleAdminChange} required style={f.input} /></div>
-                        <div style={f.fg}><label style={f.label}>แผนก</label><input type="text" name="department" value={newAdmin.department} onChange={handleAdminChange} placeholder="" style={f.input} /></div>
-                        <div style={f.fg}><label style={f.label}>ตำแหน่ง</label><input type="text" name="position" value={newAdmin.position} onChange={handleAdminChange} placeholder="" style={f.input} /></div>
-                    </div>
-                    <div style={f.row}>
-                        <div style={f.fg}><label style={f.label}>ชื่อ *</label><input type="text" name="first_name" value={newAdmin.first_name} onChange={handleAdminChange} required style={f.input} /></div>
-                        <div style={f.fg}><label style={f.label}>นามสกุล</label><input type="text" name="last_name" value={newAdmin.last_name} onChange={handleAdminChange} style={f.input} /></div>
-                    </div>
-                    <div style={f.row}>
-                        <div style={f.fg}><label style={f.label}>Username *</label><input type="text" name="username" value={newAdmin.username} onChange={handleAdminChange} required style={f.input} /></div>
-                        <div style={f.fg}><label style={f.label}>Password *</label><input type="password" name="password" value={newAdmin.password} onChange={handleAdminChange} required style={f.input} /></div>
-                        <div style={f.fg}>
-                            <label style={f.label}>ความสำคัญ</label>
+                        <div style={{...f.fg, flex: '0 0 auto', minWidth: '100px', maxWidth: '130px'}}>
+                            <label style={f.label}>ระดับสิทธิ์</label>
                             <select name="priority" value={newAdmin.priority} onChange={handleAdminChange} style={f.input}>
                                 <option value={1}>1</option>
                                 <option value={2}>2</option>
                                 <option value={3}>3</option>
                             </select>
                         </div>
+                    </div>
+                    <div style={f.row}>
+                        <div style={f.fg}><label style={f.label}>ชื่อ *</label><input type="text" name="first_name" value={newAdmin.first_name} onChange={handleAdminChange} required style={f.input} /></div>
+                        <div style={f.fg}><label style={f.label}>นามสกุล</label><input type="text" name="last_name" value={newAdmin.last_name} onChange={handleAdminChange} style={f.input} /></div>
+                    </div>
+                    <div style={f.row}>
+                        <div style={f.fg}><label style={f.label}>แผนก</label><input type="text" name="department" value={newAdmin.department} onChange={handleAdminChange} placeholder="" style={f.input} /></div>
+                        <div style={f.fg}><label style={f.label}>ตำแหน่ง</label><input type="text" name="position" value={newAdmin.position} onChange={handleAdminChange} placeholder="" style={f.input} /></div>
+                    </div>
+                    <div style={f.row}>
+                        <div style={f.fg}><label style={f.label}>Username *</label><input type="text" name="username" value={newAdmin.username} onChange={handleAdminChange} required style={f.input} /></div>
+                        <div style={f.fg}><label style={f.label}>Password *</label><input type="password" name="password" value={newAdmin.password} onChange={handleAdminChange} required style={f.input} /></div>
                     </div>
                     <button type="submit" style={{...f.primaryBtn, background: '#722ed1', marginTop: '5px'}}>บันทึกแอดมินใหม่</button>
                 </form>
@@ -550,8 +552,8 @@ export default function SystemManage() {
                       <td style={tableStyles.td}>{admin.username}</td>
                       {canManageAdmin && (
                         <td style={{...tableStyles.td, textAlign: 'center'}}>
-                          <button onClick={() => openEditAdminModal(admin)} style={{border:'none', background:'#1677ff', color:'white', padding:'5px 10px', borderRadius:'4px', cursor:'pointer', marginRight: '5px'}}><RiEdit2Fill/></button>
-                          <button onClick={() => handleDeleteAdmin(admin.staff_id, `${admin.first_name} ${admin.last_name}`)} style={{border:'none', background:'#ff4d4f', color:'white', padding:'5px 10px', borderRadius:'4px', cursor:'pointer'}}><RiDeleteBinFill/></button>
+                          <button onClick={() => openEditAdminModal(admin)} style={{border:'none', background:'#e6f4ff', color:'#1677ff', padding:'8px', margin:'0 3px', borderRadius:'6px', cursor:'pointer', display:'inline-flex'}}><RiEdit2Fill size={16}/></button>
+                          <button onClick={() => handleDeleteAdmin(admin.staff_id, `${admin.first_name} ${admin.last_name}`)} style={{border:'none', background:'#fff1f0', color:'#cf1322', padding:'8px', margin:'0 3px', borderRadius:'6px', cursor:'pointer', display:'inline-flex'}}><RiDeleteBinFill size={16}/></button>
                         </td>
                       )}
                     </tr>
@@ -599,7 +601,7 @@ export default function SystemManage() {
                         <small style={{color:'#888'}}>{row.teacher_name !== '-' ? `(${row.teacher_name})` : ''}</small>
                     </td>
                     <td style={tableStyles.td}>{row.seat_no || 'ทั้งห้อง'}</td>
-                    {canManageSystem && <td style={tableStyles.td}><button onClick={() => handleDeleteSchedule(row.id)} style={{border:'none', background:'#ff4d4f', color:'white', padding:'5px 10px', borderRadius:'4px', cursor:'pointer'}}><RiDeleteBinFill/></button></td>}
+                    {canManageSystem && <td style={tableStyles.td}><button onClick={() => handleDeleteSchedule(row.id)} style={{border:'none', background:'#fff1f0', color:'#cf1322', padding:'8px', margin:'0 3px', borderRadius:'6px', cursor:'pointer', display:'inline-flex'}}><RiDeleteBinFill size={16}/></button></td>}
                     </tr>
                 ))}
                 {schedules.length === 0 && <tr><td colSpan={canManageSystem ? "6" : "5"} style={{ ...tableStyles.td, textAlign: 'center', color: '#ccc' }}>ไม่มีข้อมูล</td></tr>}
@@ -633,7 +635,7 @@ export default function SystemManage() {
                     <td style={tableStyles.td}>{b.note}</td>
                     <td style={tableStyles.td}>{b.status === 'broken' ? <span style={{...pageStyles.badge, background: '#fff1f0', color: '#cf1322'}}>เสีย</span> : <span style={{...pageStyles.badge, background: '#f6ffed', color: '#389e0d'}}>ปกติ</span>}</td>
                     <td style={tableStyles.td}>{b.fixed_date ? formatThaiDate(b.fixed_date) : '-'}</td>
-                    {canManageSystem && <td style={tableStyles.td}>{b.status === 'broken' && <button onClick={() => handleResolveBroken(b.id)} style={{border:'none', background:'#52c41a', color:'white', padding:'5px 10px', borderRadius:'4px', cursor:'pointer'}}><RiCheckFill/></button>}</td>}
+                    {canManageSystem && <td style={tableStyles.td}>{b.status === 'broken' && <button onClick={() => handleResolveBroken(b.id)} style={{border:'none', background:'#f6ffed', color:'#389e0d', padding:'8px', margin:'0 3px', borderRadius:'6px', cursor:'pointer', display:'inline-flex'}}><RiCheckFill size={16}/></button>}</td>}
                     </tr>
                 ))}
                 {brokenList.length === 0 && <tr><td colSpan={canManageSystem ? "6" : "5"} style={{ ...tableStyles.td, textAlign: 'center', color: '#ccc' }}>ไม่มีข้อมูล</td></tr>}
@@ -667,7 +669,7 @@ export default function SystemManage() {
                         <div style={f.fg}><label style={f.label}>Username *</label><input type="text" name="username" value={editingAdmin.username} onChange={handleEditAdminChange} required style={f.input} /></div>
                         <div style={f.fg}><label style={f.label}>Passwordใหม่ (เว้นว่างถ้าไม่เปลี่ยน)</label><input type="password" name="password" value={editingAdmin.password} onChange={handleEditAdminChange} style={f.input} placeholder="********" /></div>
                         <div style={f.fg}>
-                            <label style={f.label}>ความสำคัญ</label>
+                            <label style={f.label}>ระดับสิทธิ์</label>
                             <select name="priority" value={editingAdmin.priority} onChange={handleEditAdminChange} style={f.input}>
                                 <option value={1}>1</option>
                                 <option value={2}>2</option>
@@ -690,7 +692,7 @@ export default function SystemManage() {
 
 const f = {
   form: { display: 'flex', flexDirection: 'column', gap: '14px' },
-  row: { display: 'flex', gap: '12px' },
+  row: { display: 'flex', gap: '12px', alignItems: 'flex-start' },
   fg: { display: 'flex', flexDirection: 'column', gap: '5px', flex: 1 },
   label: { fontSize: '0.9rem', fontWeight: '700', color: '#4a5568' },
   input: { padding: '10px', border: '1px solid #ddd', borderRadius: '8px', width: '100%', boxSizing: 'border-box', outline: 'none' },

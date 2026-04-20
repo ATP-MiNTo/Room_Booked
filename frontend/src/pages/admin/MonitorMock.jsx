@@ -153,12 +153,8 @@ export default function MonitorMock() {
   };
 
   const size = {
-    seat: isMobile ? '45px' : '85px',          
-    gapWrapper: isMobile ? '20px' : '70px',    
-    gapGrid: isMobile ? '10px' : '20px',       
-    icon: isMobile ? 22 : 42,                  
-    fontSize: isMobile ? '11px' : '16px',      
-    containerPadding: isMobile ? '15px' : '40px', 
+    icon: isMobile ? 18 : 30,
+    fontSize: isMobile ? '10px' : '14px',
   };
 
   const Seat = ({ seatNumber }) => {
@@ -287,17 +283,16 @@ export default function MonitorMock() {
 
                 {/* 🟢 Seat Map Card Mock Theme */}
                 <div style={{ ...pageStyles.card, border: '2px solid #fbcfe8', boxShadow: '0 4px 15px rgba(219,39,119,0.08)' }}>
-                    <div style={{ textAlign: 'center', padding: '10px', backgroundColor: '#831843', borderRadius: '8px', marginBottom: isMobile ? '20px' : '35px', minWidth: isMobile ? '360px' : 'auto', fontWeight: 'bold', color: 'white', fontSize: isMobile ? '0.9rem' : '1.1rem', letterSpacing: '2px' }}>
-                        กระดานหน้าชั้นเรียน / จอโปรเจคเตอร์
+                    <div style={{ textAlign: 'center', padding: '10px', backgroundColor: '#831843', borderRadius: '8px', marginBottom: isMobile ? '20px' : '35px', fontWeight: 'bold', color: 'white', fontSize: isMobile ? '0.9rem' : '1.1rem', letterSpacing: '2px' }}>
+                        กระดาน (หน้าห้อง)
                     </div>
                     
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: size.gapWrapper, minWidth: isMobile ? '360px' : 'auto', paddingBottom: isMobile ? '10px' : '0' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: size.gapGrid }}>
-                            {leftSideSeats.map(num => <Seat key={num} seatNumber={num} />)}
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: size.gapGrid }}>
-                            {rightSideSeats.map(num => <Seat key={num} seatNumber={num} />)}
-                        </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 0.4fr 1fr 1fr 1fr', gap: '8px' }}>
+                        {Array.from({ length: 30 }, (_, i) => i + 1).map(num => {
+                          const col = ((num - 1) % 6) + 1;
+                          const gridColumn = col > 3 ? col + 1 : col;
+                          return <div key={num} style={{ gridColumn }}><Seat seatNumber={num} /></div>;
+                        })}
                     </div>
                 </div>
 

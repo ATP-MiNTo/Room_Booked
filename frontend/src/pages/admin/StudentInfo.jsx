@@ -3,7 +3,7 @@ import AdminLayout from '../../components/admin/AdminLayout';
 import Swal from 'sweetalert2';
 import {
   RiSearchLine, RiRefreshLine, RiFileExcel2Line,
-  RiGroupFill, RiEdit2Line, RiDeleteBinLine, RiSave3Line, RiCloseLine,
+  RiGroupFill, RiEdit2Fill, RiDeleteBinFill, RiSave3Line, RiCloseLine,
   RiArrowUpSFill, RiArrowDownSFill, RiArrowLeftSLine, RiArrowRightSLine,
   RiFilter3Fill, RiArrowDownSLine, RiHistoryFill, RiImageAddLine,
   RiPieChartLine, RiUserStarLine
@@ -129,11 +129,33 @@ export default function StudentInfo() {
     }
   };
 
-  const exportToCSV = () => {
-    const headers = ['รหัสนักศึกษา', 'ชื่อ', 'นามสกุล', 'สาขา', 'ชั้นปี'];
+  const exportToCSV = async () => {
+    const headers = ['รหัสนักศึกษา', 'ชื่อ', 'นามสกุล', 'สาขา', 'ชั้นปี', 'จำนวนครั้งที่จอง', 'ชั่วโมงที่ใช้รวม'];
+    const dataRows = await Promise.all(sortedStudents.map(async (s) => {
+      try {
+        const res = await authFetch(`/api/students/${s.student_id}/reservations`);
+        const history = res.ok ? await res.json() : [];
+        const count = history.length;
+        let totalMins = 0;
+        history.forEach(log => {
+          if (log.start_time && log.end_time) {
+            const [sh, sm] = log.start_time.split(':').map(Number);
+            const [eh, em] = log.end_time.split(':').map(Number);
+            const diff = (eh * 60 + em) - (sh * 60 + sm);
+            if (diff > 0) totalMins += diff;
+          }
+        });
+        const hrs = Math.floor(totalMins / 60);
+        const mins = totalMins % 60;
+        const hoursStr = totalMins === 0 ? '0 ชม.' : `${hrs ? hrs + ' ชม. ' : ''}${mins ? mins + ' นาที' : ''}`.trim();
+        return [s.student_id, s.first_name, s.last_name, s.major, s.year_level, count, hoursStr];
+      } catch {
+        return [s.student_id, s.first_name, s.last_name, s.major, s.year_level, '-', '-'];
+      }
+    }));
     const rows = [
       headers.map(escapeCSV).join(','),
-      ...sortedStudents.map(s => [s.student_id, s.first_name, s.last_name, s.major, s.year_level].map(escapeCSV).join(',')),
+      ...dataRows.map(row => row.map(escapeCSV).join(',')),
     ];
     downloadCSV(rows, `student_info_${fmtDate(new Date())}.csv`);
   };
@@ -251,7 +273,7 @@ export default function StudentInfo() {
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', padding: '6px 12px', borderRadius: '20px', border: '1px solid #f1f5f9' }}>
                     <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: COLORS_YEAR[i % COLORS_YEAR.length] }} />
                     <span style={{ fontSize: '0.85rem', color: '#475569' }}>{d.name}</span>
-                    <strong style={{ fontSize: '0.9rem', color: '#0f172a' }}>{d.value}</strong>
+                    <strong style={{ fontSize: '0.9rem', color: '#0f172a' }}>{d.value} คน</strong>
                   </div>
                 ))}
                 {yearStatsData.length === 0 && <span style={{ fontSize: '0.85rem', color: '#aaa' }}>ไม่มีข้อมูลชั้นปี</span>}
@@ -369,13 +391,13 @@ export default function StudentInfo() {
                     <>
                       <td style={tableStyles.td}>{std.first_name}</td>
                       <td style={tableStyles.td}>{std.last_name}</td>
-                      <td style={tableStyles.td}>{std.major}</td>
+                      <td style={{ ...tableStyles.td, fontSize: '0.82rem' }}>{std.major}</td>
                       <td style={{ ...tableStyles.td, textAlign: 'center' }}>
-                        <span style={{ fontWeight: 'bold', color: '#8b5cf6', background: '#f3e8ff', padding: '4px 10px', borderRadius: '20px', fontSize: '0.85rem' }}>{std.year_level}</span>
+                        <span style={{ fontWeight: 'bold', color: '#8b5cf6', background: '#f3e8ff', padding: '4px 8px', borderRadius: '20px', fontSize: '0.8rem', whiteSpace: 'nowrap', display: 'inline-block' }}>{std.year_level}</span>
                       </td>
                       <td style={{ ...tableStyles.td, textAlign: 'center' }}>
-                        <button onClick={() => startEditing(std)} style={s.iconBtnInfo}    title="แก้ไข"><RiEdit2Line size={18} /></button>
-                        <button onClick={() => handleDelete(std.student_id, `${std.first_name} ${std.last_name}`)} style={s.iconBtnDanger} title="ลบ"><RiDeleteBinLine size={18} /></button>
+                        <button onClick={() => startEditing(std)} style={s.iconBtnInfo}    title="แก้ไข"><RiEdit2Fill size={18} /></button>
+                        <button onClick={() => handleDelete(std.student_id, `${std.first_name} ${std.last_name}`)} style={s.iconBtnDanger} title="ลบ"><RiDeleteBinFill size={18} /></button>
                       </td>
                     </>
                   )}
@@ -391,13 +413,14 @@ export default function StudentInfo() {
         {/* Pagination */}
         {totalPages > 1 && (
           <div style={pageStyles.pagination}>
-            <button style={{ ...pageStyles.pageBtn, opacity: currentPage === 1 ? 0.5 : 1 }} onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} disabled={currentPage === 1}>
+            <button style={{ ...pageStyles.pageBtn, opacity: currentPage === 1 ? 0.5 : 1, minWidth: '90px', justifyContent: 'center' }} onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} disabled={currentPage === 1}>
               <RiArrowLeftSLine size={18} /> ก่อนหน้า
             </button>
-            <span style={{ fontSize: '0.9rem', color: '#555', fontWeight: 'bold' }}>
-              หน้า {currentPage} จาก {totalPages} <span style={{ color: '#aaa', fontWeight: 'normal' }}>({sortedStudents.length} คน)</span>
+            <span style={{ fontSize: '0.9rem', color: '#555', fontWeight: 'bold', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <span>หน้า {currentPage} จาก {totalPages}</span>
+              <span style={{ color: '#aaa', fontWeight: 'normal', fontSize: '0.82rem' }}>({sortedStudents.length} คน)</span>
             </span>
-            <button style={{ ...pageStyles.pageBtn, opacity: currentPage === totalPages ? 0.5 : 1 }} onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>
+            <button style={{ ...pageStyles.pageBtn, opacity: currentPage === totalPages ? 0.5 : 1, minWidth: '90px', justifyContent: 'center' }} onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>
               ถัดไป <RiArrowRightSLine size={18} />
             </button>
           </div>
@@ -407,7 +430,7 @@ export default function StudentInfo() {
       {/* History modal */}
       {historyModalOpen && selectedStudent && (
         <div style={pageStyles.modalBackdrop} onClick={() => setHistoryModalOpen(false)}>
-          <div style={{ ...pageStyles.modalContent, width: '900px', padding: '25px' }} onClick={e => e.stopPropagation()}>
+          <div style={{ ...pageStyles.modalContent, width: 'min(900px, 95vw)', padding: '25px' }} onClick={e => e.stopPropagation()}>
             <button style={pageStyles.closeModalBtn} onClick={() => setHistoryModalOpen(false)}><RiCloseLine size={24} /></button>
             <h3 style={{ margin: '0 0 15px 0', color: '#2c3e50', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <RiHistoryFill color="#1677ff" /> Booking History: {selectedStudent.first_name} {selectedStudent.last_name}

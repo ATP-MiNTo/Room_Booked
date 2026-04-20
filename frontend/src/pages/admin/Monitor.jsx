@@ -141,12 +141,8 @@ export default function Monitor() {
   };
 
   const size = {
-    seat: isMobile ? '45px' : '85px',          
-    gapWrapper: isMobile ? '20px' : '70px',    
-    gapGrid: isMobile ? '10px' : '20px',       
-    icon: isMobile ? 22 : 42,                  
-    fontSize: isMobile ? '11px' : '16px',      
-    containerPadding: isMobile ? '15px' : '40px', 
+    icon: isMobile ? 18 : 30,
+    fontSize: isMobile ? '10px' : '14px',
   };
 
   const Seat = ({ seatNumber }) => {
@@ -183,14 +179,14 @@ export default function Monitor() {
       <div 
         onClick={() => setSelectedSeat({ number: seatNumber, ...seatData })}
         style={{
-            width: size.seat, height: size.seat, 
+            padding: isMobile ? '6px 0' : '10px 0',
             backgroundColor: isSelected ? 'rgba(22, 119, 255, 0.15)' : bgStyle,
             border: isSelected ? '2px solid #1677ff' : `2px solid ${iconColor}40`,
-            borderRadius: '12px', display: 'flex', flexDirection: 'column', 
+            borderRadius: '8px', display: 'flex', flexDirection: 'column', 
             justifyContent: 'center', alignItems: 'center', cursor: 'pointer',
             transition: 'transform 0.2s, box-shadow 0.2s', 
             boxShadow: isSelected ? '0 4px 12px rgba(22,119,255,0.3)' : '0 2px 4px rgba(0,0,0,0.05)',
-            position: 'relative'
+            position: 'relative', userSelect: 'none'
         }}
         onMouseEnter={(e) => !isMobile && (e.currentTarget.style.transform = 'translateY(-3px)')}
         onMouseLeave={(e) => !isMobile && (e.currentTarget.style.transform = 'translateY(0)')}
@@ -279,17 +275,16 @@ export default function Monitor() {
                 </div>
 
                 <div style={pageStyles.card}>
-                    <div style={{ textAlign: 'center', padding: '10px', backgroundColor: '#1e293b', borderRadius: '8px', marginBottom: isMobile ? '20px' : '35px', minWidth: isMobile ? '360px' : 'auto', fontWeight: 'bold', color: 'white', fontSize: isMobile ? '0.9rem' : '1.1rem', letterSpacing: '2px' }}>
-                        กระดานหน้าชั้นเรียน / จอโปรเจคเตอร์
+                    <div style={{ textAlign: 'center', padding: '10px', backgroundColor: '#1e293b', borderRadius: '8px', marginBottom: isMobile ? '20px' : '35px', fontWeight: 'bold', color: 'white', fontSize: isMobile ? '0.9rem' : '1.1rem', letterSpacing: '2px' }}>
+                        กระดาน (หน้าห้อง)
                     </div>
                     
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: size.gapWrapper, minWidth: isMobile ? '360px' : 'auto', paddingBottom: isMobile ? '10px' : '0' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: size.gapGrid }}>
-                            {leftSideSeats.map(num => <Seat key={num} seatNumber={num} />)}
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: size.gapGrid }}>
-                            {rightSideSeats.map(num => <Seat key={num} seatNumber={num} />)}
-                        </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 0.4fr 1fr 1fr 1fr', gap: '8px' }}>
+                        {Array.from({ length: 30 }, (_, i) => i + 1).map(num => {
+                          const col = ((num - 1) % 6) + 1;
+                          const gridColumn = col > 3 ? col + 1 : col;
+                          return <div key={num} style={{ gridColumn }}><Seat seatNumber={num} /></div>;
+                        })}
                     </div>
                 </div>
 

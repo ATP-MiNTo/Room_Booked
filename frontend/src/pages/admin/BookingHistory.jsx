@@ -280,7 +280,7 @@ export default function BookingHistory() {
                     <div style={{ fontSize: '0.75rem', color: '#aaa' }}>{log.major}</div>
                   </td>
                   <td style={{ ...tableStyles.td, textAlign: 'center' }}>
-                    <span style={{ fontWeight: 'bold', color: '#8b5cf6', background: '#f3e8ff', padding: '4px 10px', borderRadius: '20px', fontSize: '0.85rem' }}>{log.year_level}</span>
+                    <span style={{ fontWeight: 'bold', color: '#8b5cf6', background: '#f3e8ff', padding: '4px 10px', borderRadius: '20px', fontSize: '0.85rem', whiteSpace: 'nowrap', display: 'inline-block' }}>{log.year_level}</span>
                   </td>
                   <td style={{ ...tableStyles.td, fontWeight: '700', color: '#1677ff', textAlign: 'center', fontSize: '1.1rem' }}>{log.seat_id}</td>
                   <td style={tableStyles.td}>
@@ -324,13 +324,13 @@ export default function BookingHistory() {
         {/* Pagination */}
         {totalPages > 1 && (
           <div style={pageStyles.pagination}>
-            <button style={{ ...pageStyles.pageBtn, opacity: currentPage === 1 ? 0.5 : 1 }} onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} disabled={currentPage === 1}>
+            <button style={{ ...pageStyles.pageBtn, opacity: currentPage === 1 ? 0.5 : 1, minWidth: '90px', justifyContent: 'center' }} onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} disabled={currentPage === 1}>
               <RiArrowLeftSLine size={18} /> ก่อนหน้า
             </button>
-            <span style={{ fontSize: '0.9rem', color: '#555', fontWeight: 'bold' }}>
-              หน้า {currentPage} จาก {totalPages} <span style={{ color: '#aaa', fontWeight: 'normal' }}>({sortedLogs.length} รายการ)</span>
+            <span style={{ fontSize: '0.9rem', color: '#555', fontWeight: 'bold', textAlign: 'center' }}>
+              หน้า {currentPage} จาก {totalPages}<br/><span style={{ color: '#aaa', fontWeight: 'normal', fontSize: '0.82rem' }}>({sortedLogs.length} รายการ)</span>
             </span>
-            <button style={{ ...pageStyles.pageBtn, opacity: currentPage === totalPages ? 0.5 : 1 }} onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>
+            <button style={{ ...pageStyles.pageBtn, opacity: currentPage === totalPages ? 0.5 : 1, minWidth: '90px', justifyContent: 'center' }} onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>
               ถัดไป <RiArrowRightSLine size={18} />
             </button>
           </div>
@@ -340,7 +340,7 @@ export default function BookingHistory() {
       {/* Student Info Modal — เหมือน StudentInfo */}
       {studentModal && (
         <div style={pageStyles.modalBackdrop} onClick={() => setStudentModal(null)}>
-          <div style={{ ...pageStyles.modalContent, width: '900px', padding: '25px' }} onClick={e => e.stopPropagation()}>
+          <div style={{ ...pageStyles.modalContent, width: 'min(900px, 95vw)', padding: '25px' }} onClick={e => e.stopPropagation()}>
             <button style={pageStyles.closeModalBtn} onClick={() => setStudentModal(null)}><RiCloseLine size={24} /></button>
             <h3 style={{ margin: '0 0 15px 0', color: '#2c3e50', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <RiHistoryFill color="#1677ff" /> Booking History: {studentModal.first_name} {studentModal.last_name}

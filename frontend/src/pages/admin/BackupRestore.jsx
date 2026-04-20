@@ -187,7 +187,7 @@ export default function BackupRestore() {
         </div>
 
         {/* 🟢 แบ่งครึ่ง 2 ฝั่ง ซ้าย Backup ขวา Migrate */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '20px', marginBottom: '30px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '30px' }}>
           
           {/* สำรองข้อมูล */}
           <div style={pageStyles.card}>
@@ -197,7 +197,7 @@ export default function BackupRestore() {
               </div>
               <h3 style={{ color: '#2c3e50', margin: '0 0 15px 0' }}>เลือกขอบเขตการสำรองข้อมูล</h3>
               
-              <div style={{ display: 'flex', gap: '20px', marginBottom: '20px', width: '100%', maxWidth: '400px', backgroundColor: '#f8f9fa', padding: '15px', borderRadius: '8px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px', width: '100%', maxWidth: '400px', backgroundColor: '#f8f9fa', padding: '15px', borderRadius: '8px' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'bold', color: '#555' }}>
                   <input 
                     type="radio" 
@@ -221,12 +221,12 @@ export default function BackupRestore() {
               </div>
 
               {backupMode === 'range' && (
-                <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', width: '100%', maxWidth: '400px' }}>
-                  <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px', width: '100%', maxWidth: '400px' }}>
+                  <div style={{ textAlign: 'left' }}>
                     <label style={f.label}>ตั้งแต่วันที่</label>
                     <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{...f.input, marginTop: '5px'}} required />
                   </div>
-                  <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div style={{ textAlign: 'left' }}>
                     <label style={f.label}>ถึงวันที่</label>
                     <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{...f.input, marginTop: '5px'}} required />
                   </div>
@@ -306,8 +306,7 @@ export default function BackupRestore() {
             <table style={tableStyles.table}>
               <thead>
                 <tr>
-                  <th style={{...tableStyles.th, width: '18%'}}>วันที่ดำเนินการ</th>
-                  <th style={{...tableStyles.th, width: '12%'}}>เวลา</th>
+                  <th style={{...tableStyles.th, width: '25%'}}>วันที่ / เวลา</th>
                   <th style={tableStyles.th}>ประเภทรายการ</th>
                   <th style={tableStyles.th}>ผู้ดำเนินการ</th>
                   <th style={tableStyles.th}>ชื่อไฟล์</th>
@@ -319,22 +318,21 @@ export default function BackupRestore() {
                     const formatted = formatLogDate(item.date);
                     return (
                       <tr key={idx}>
-                        <td style={{...tableStyles.td, fontWeight: 'bold', color: '#444'}}>{formatted.date}</td>
-                        <td style={{...tableStyles.td, color: '#64748b'}}>{formatted.time}</td>
+                        <td style={{...tableStyles.td, fontWeight: 'bold', color: '#444'}}>{formatted.date}<br/><small style={{color:'#64748b', fontWeight:'normal'}}>{formatted.time}</small></td>
                         <td style={tableStyles.td}>
                           {item.type === 'backup' 
                             ? <span style={{ ...pageStyles.badge, background: '#e6f4ff', color: '#1677ff' }}>สำรองข้อมูล</span> 
-                            : <span style={{ ...pageStyles.badge, background: '#fff1f0', color: '#dc3545' }}>นำเข้าข้อมูล (Migration)</span>
+                            : <span style={{ ...pageStyles.badge, background: '#fff1f0', color: '#dc3545' }}>นำเข้าข้อมูล</span>
                           }
                         </td>
                         <td style={tableStyles.td}>{item.admin_name}</td>
-                        <td style={tableStyles.td}><small style={{ color: '#888' }}>{item.file_name}</small></td>
+                        <td style={tableStyles.td}><small style={{ color: '#888', wordBreak: 'break-all' }}>{item.file_name}</small></td>
                       </tr>
                     );
                   })
                 ) : (
                   <tr>
-                    <td colSpan="5" style={{ ...tableStyles.td, textAlign: 'center', color: '#ccc', padding: '30px' }}>
+                    <td colSpan="4" style={{ ...tableStyles.td, textAlign: 'center', color: '#ccc', padding: '30px' }}>
                       ยังไม่มีประวัติการทำรายการล่าสุด
                     </td>
                   </tr>
