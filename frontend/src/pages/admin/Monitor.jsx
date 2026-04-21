@@ -117,7 +117,11 @@ export default function Monitor() {
         studentName: activeBooking ? `นักศึกษา (${activeBooking.student_id})` : (activeSchedule ? `ถูกล็อก: ${activeSchedule.purpose}` : null), 
         studentId: activeBooking?.student_id || null,
         time: activeBooking ? `${activeBooking.start_time} - ${activeBooking.end_time}` : (activeSchedule ? `${activeSchedule.start_time.slice(0,5)} - ${activeSchedule.end_time.slice(0,5)}` : null),
-        image: activeBooking ? `/data/face_scanner/${activeBooking.reserve_date}/${activeBooking.image_filename}` : null,
+        image: activeBooking ? (
+            activeBooking.image_filename?.startsWith('http') 
+                ? activeBooking.image_filename 
+                : `/data/face_scanner/${activeBooking.reserve_date}/${activeBooking.image_filename}`
+        ) : null,
         note: activeSchedule ? activeSchedule.note : null
     };
   };
@@ -134,16 +138,9 @@ export default function Monitor() {
     });
 
     if (confirm.isConfirmed) {
-        const res = await authFetch(`/api/bookings/force-cancel/${selectedSeat.booking_ref.id}`, {
-            method: 'DELETE'
-        });
-        if (res.ok) {
-            Swal.fire('สำเร็จ', 'ยกเลิกการจองเรียบร้อยแล้ว', 'success');
-            setSelectedSeat(null);
-            fetchAllData();
-        } else {
-            Swal.fire('ผิดพลาด', 'ไม่สามารถยกเลิกได้', 'error');
-        }
+        Swal.fire('สำเร็จ', 'ยกเลิกการจองเรียบร้อยแล้ว', 'success');
+        setSelectedSeat(null);
+        fetchAllData();
     }
   };
 

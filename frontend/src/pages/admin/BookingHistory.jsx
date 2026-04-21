@@ -67,10 +67,11 @@ export default function BookingHistory() {
   // 🟢 2. ฟังก์ชันสร้าง URL รูปภาพที่ถูกต้อง (ชี้ไปที่ Backend)
   const getImageUrl = (date, filename) => {
     if (!filename) return null;
-    // ป้องกันกรณี filename มี / นำหน้า
+    // ถ้าเป็น Cloudinary URL หรือ URL เต็มๆ ให้ใช้ตรงๆ เลย
+    if (filename.startsWith('http://') || filename.startsWith('https://')) return filename;
+    // ถ้าเป็น filename เก่า ให้ build path แบบเดิม
     const cleanFilename = filename.startsWith('/') ? filename.substring(1) : filename;
-    // คืนค่าเป็นพาทเต็ม เช่น http://localhost:8000/data/face_scanner/2026-04-18/filename.jpg
-    return `${BACKEND_URL}/data/face_scanner/${date}/${cleanFilename}`;
+    return `/data/face_scanner/${date}/${cleanFilename}`;
   };
 
   const handleFilterChange = (e) => {

@@ -1,10 +1,19 @@
 import os
 import shutil
+import cloudinary
+import cloudinary.uploader
 from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form 
 from pydantic import BaseModel
 from datetime import datetime, date, time, timezone, timedelta
 
 from database import get_db
+
+# ตั้งค่า Cloudinary
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME", "dxnogh96j"),
+    api_key=os.getenv("CLOUDINARY_API_KEY", "367479691313863"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET", "TmEl9PP-xty69Y12jMKic6niE7g")
+)
 
 router = APIRouter()
 
@@ -239,31 +248,29 @@ def reserve_with_image(
             raise HTTPException(status_code=409, detail="ที่นั่งนี้ถูกจองไปแล้ว กรุณาเลือกรอบเวลาอื่น")
         
         # จัดการไฟล์รูปภาพ
-        folder_name = reserve_date.strftime("%Y-%m-%d")
-        daily_upload_dir = os.path.join(BASE_UPLOAD_DIR, folder_name)
-        if not os.path.exists(daily_upload_dir):
-            os.makedirs(daily_upload_dir, exist_ok=True)
-            
         date_str = reserve_date.strftime("%Y%m%d")
         start_str = start_time.strftime("%H%M")
         end_str = end_time.strftime("%H%M")
-        file_ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
-        filename = f"{date_str}_Seat{seat_id:02d}_{start_str}_{end_str}_{student_id}.{file_ext}"
-        file_path = os.path.join(daily_upload_dir, filename)
+        public_id = f"face_scanner/{reserve_date.strftime('%Y-%m-%d')}/{date_str}_Seat{seat_id:02d}_{start_str}_{end_str}_{student_id}"
         image_data = image.file.read()
+
+        # Upload ไป Cloudinary
+        upload_result = cloudinary.uploader.upload(
+            image_data,
+            public_id=public_id,
+            overwrite=True,
+            resource_type="image"
+        )
+        image_url = upload_result["secure_url"]
 
         cur.execute("""
             INSERT INTO reservations (student_id, seat_no, start_time, end_time, purpose, image_name)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, (student_id, seat_id, start_naive, end_naive, purpose, filename))
+        """, (student_id, seat_id, start_naive, end_naive, purpose, image_url))
 
         conn.commit()
 
-        # Save Image
-        with open(file_path, "wb") as buffer:
-            buffer.write(image_data)
-
-        return {"message": "จองสำเร็จ", "image_filename": filename}
+        return {"message": "จองสำเร็จ", "image_filename": image_url}
 
     except HTTPException:
         if conn: conn.rollback()
