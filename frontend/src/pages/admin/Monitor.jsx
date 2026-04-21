@@ -126,23 +126,26 @@ export default function Monitor() {
     };
   };
 
-  const forceEndBooking = async (studentId) => {
-    const confirm = await Swal.fire({
-      title: 'ต้องการยกเลิกการจอง?',
-      text: `บังคับยกเลิกการจองของรหัส ${studentId} ทันที`,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonColor: '#d33',
-      cancelButtonText: 'ยกเลิก',
-      confirmButtonText: 'ใช่, ยกเลิกเลย'
-    });
+const forceEndBooking = async (studentId) => {
+  const confirm = await Swal.fire({ /* ... */ });
 
-    if (confirm.isConfirmed) {
+  if (confirm.isConfirmed) {
+    try {
+      const booking = selectedSeat.booking_ref;
+      const res = await authFetch(`/api/reservations/${booking.id}`, { method: 'DELETE' });
+      
+      if (res.ok) {
         Swal.fire('สำเร็จ', 'ยกเลิกการจองเรียบร้อยแล้ว', 'success');
         setSelectedSeat(null);
         fetchAllData();
+      } else {
+        Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถยกเลิกได้', 'error');
+      }
+    } catch (e) {
+      Swal.fire('เกิดข้อผิดพลาด', e.message, 'error');
     }
-  };
+  }
+};
 
   const size = {
     icon: isMobile ? 18 : 30,
