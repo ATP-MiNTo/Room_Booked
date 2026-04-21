@@ -9,3 +9,11 @@ def get_db():
         password=os.getenv("POSTGRES_PASSWORD", "postgres"),
         port=os.getenv("POSTGRES_PORT", "5432")
     )
+
+def init_sequences():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT setval('reservations_id_seq', COALESCE((SELECT MAX(id) FROM reservations), 0))")
+    conn.commit()
+    cur.close()
+    conn.close()

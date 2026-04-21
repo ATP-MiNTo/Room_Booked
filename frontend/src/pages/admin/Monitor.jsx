@@ -134,9 +134,16 @@ export default function Monitor() {
     });
 
     if (confirm.isConfirmed) {
-        Swal.fire('สำเร็จ', 'ยกเลิกการจองเรียบร้อยแล้ว', 'success');
-        setSelectedSeat(null);
-        fetchAllData();
+        const res = await authFetch(`/api/bookings/force-cancel/${selectedSeat.booking_ref.id}`, {
+            method: 'DELETE'
+        });
+        if (res.ok) {
+            Swal.fire('สำเร็จ', 'ยกเลิกการจองเรียบร้อยแล้ว', 'success');
+            setSelectedSeat(null);
+            fetchAllData();
+        } else {
+            Swal.fire('ผิดพลาด', 'ไม่สามารถยกเลิกได้', 'error');
+        }
     }
   };
 
