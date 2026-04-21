@@ -38,14 +38,18 @@ const Seat = ({ seatNumber, isSelected, statusData, onClick }) => {
       style={{ 
         cursor: isDisabled ? 'not-allowed' : 'pointer', 
         opacity: isDisabled ? 0.6 : 1,
-        transition: 'transform 0.2s'
+        transition: 'transform 0.2s',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center'
       }}
       onMouseEnter={(e) => !isDisabled && (e.currentTarget.style.transform = 'scale(1.1)')}
       onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
     >
       {/* เรียกใช้ Icon ที่ถูกเลือก */}
-      <IconComponent className="seat-icon" color={iconColor} /> 
-      <div className="seat-number">{seatNumber}</div>
+      <IconComponent className="seat-icon" color={iconColor} size={32} /> 
+      <div className="seat-number" style={{ marginTop: '5px', fontWeight: 'bold' }}>{seatNumber}</div>
     </div>
   );
 };

@@ -499,20 +499,20 @@ def get_system_logs(admin=Depends(verify_token)):
 class AdminCreate(BaseModel):
     staff_id: str
     first_name: str
-    last_name: str
-    department: str
-    position: str
+    last_name: Optional[str] = None      # 🟢 ต้องมี = None
+    department: Optional[str] = None     # 🟢 ต้องมี = None
+    position: Optional[str] = None       # 🟢 ต้องมี = None
     username: str
     password: str
-    priority: int = 3 
+    priority: int = 3
 
 class AdminUpdate(BaseModel):
     first_name: str
-    last_name: str
-    department: str
-    position: str
+    last_name: Optional[str] = None      # 🟢 ต้องมี = None
+    department: Optional[str] = None     # 🟢 ต้องมี = None
+    position: Optional[str] = None       # 🟢 ต้องมี = None
     username: str
-    password: Optional[str] = None
+    password: Optional[str] = None       # 🟢 ต้องมี = None
     priority: int
 
 @router.get("/api/admins")
@@ -564,10 +564,15 @@ def create_admin(admin: AdminCreate, current_admin=Depends(verify_token)):
         # ✅ Hash รหัสผ่านก่อน INSERT เข้า Database
         hashed_pw = get_password_hash(admin.password)
 
+        # 🟢 ดักค่า None ไว้ เผื่อตอน Insert ถ้าเป็น None ก็จะได้ค่า Null ใน DB หรือ '-' (ถ้าต้องการ)
+        last_name_val = admin.last_name if admin.last_name else ""
+        department_val = admin.department if admin.department else ""
+        position_val = admin.position if admin.position else ""
+
         cur.execute("""
             INSERT INTO admins (staff_id, first_name, last_name, department, position, username, password_hash, priority)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (admin.staff_id, admin.first_name, admin.last_name, admin.department, admin.position, admin.username, hashed_pw, admin.priority))
+        """, (admin.staff_id, admin.first_name, last_name_val, department_val, position_val, admin.username, hashed_pw, admin.priority))
         
         conn.commit()
         return {"message": "เพิ่มผู้ดูแลระบบสำเร็จ"}
@@ -597,6 +602,11 @@ def update_admin(staff_id: str, admin: AdminUpdate, current_admin=Depends(verify
         if cur.fetchone():
             raise HTTPException(status_code=400, detail="Username นี้มีผู้ใช้อื่นใช้งานแล้ว")
 
+        # 🟢 จัดการค่า None ให้ปลอดภัย
+        last_name_val = admin.last_name if admin.last_name else ""
+        department_val = admin.department if admin.department else ""
+        position_val = admin.position if admin.position else ""
+
         if admin.password and admin.password.strip() != "":
             # ✅ Hash รหัสผ่านใหม่ก่อน UPDATE
             hashed_pw = get_password_hash(admin.password)
@@ -604,13 +614,13 @@ def update_admin(staff_id: str, admin: AdminUpdate, current_admin=Depends(verify
                 UPDATE admins 
                 SET first_name=%s, last_name=%s, department=%s, position=%s, username=%s, password_hash=%s, priority=%s
                 WHERE staff_id=%s
-            """, (admin.first_name, admin.last_name, admin.department, admin.position, admin.username, hashed_pw, admin.priority, staff_id))
+            """, (admin.first_name, last_name_val, department_val, position_val, admin.username, hashed_pw, admin.priority, staff_id))
         else:
             cur.execute("""
                 UPDATE admins 
                 SET first_name=%s, last_name=%s, department=%s, position=%s, username=%s, priority=%s
                 WHERE staff_id=%s
-            """, (admin.first_name, admin.last_name, admin.department, admin.position, admin.username, admin.priority, staff_id))
+            """, (admin.first_name, last_name_val, department_val, position_val, admin.username, admin.priority, staff_id))
             
         conn.commit()
         return {"message": "อัปเดตข้อมูลสำเร็จ"}

@@ -237,6 +237,8 @@ export default function SystemManage() {
 
       const res = await authFetch('/api/admins', { 
         method: 'POST',
+        // 🟢 เพิ่ม Header ใน authFetch.js แล้ว แต่ใส่เผื่อไว้ด้วยก็ได้ครับ
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({...newAdmin, priority: parseInt(newAdmin.priority) })
       });
 
@@ -246,7 +248,11 @@ export default function SystemManage() {
         setNewAdmin({ staff_id: '', first_name: '', last_name: '', department: '', position: '', username: '', password: '', priority: 3 });
         fetchData();
       } else {
-        Swal.fire('ข้อผิดพลาด', data.detail || 'ไม่สามารถเพิ่มแอดมินได้', 'error');
+        // 🟢 ดักจับ Error แบบ Array เพื่อป้องกัน SweetAlert พัง
+        const errorMsg = Array.isArray(data.detail) 
+            ? data.detail.map(err => err.msg || JSON.stringify(err)).join(', ') 
+            : (data.detail || 'ไม่สามารถเพิ่มแอดมินได้');
+        Swal.fire('ข้อผิดพลาด', errorMsg, 'error');
       }
     } catch (e) {
       Swal.fire('ข้อผิดพลาด', 'ติดต่อเซิร์ฟเวอร์ไม่ได้', 'error');
@@ -298,6 +304,7 @@ export default function SystemManage() {
 
           const res = await authFetch(`/api/admins/${editingAdmin.staff_id}`, { 
             method: 'PUT', 
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({...editingAdmin, priority: parseInt(editingAdmin.priority)})
           });
           const data = await res.json();
@@ -306,7 +313,11 @@ export default function SystemManage() {
               setIsEditModalOpen(false);
               fetchData();
           } else {
-              Swal.fire('ข้อผิดพลาด', data.detail || 'ไม่สามารถแก้ไขข้อมูลได้', 'error');
+              // 🟢 ดักจับ Error แบบ Array
+              const errorMsg = Array.isArray(data.detail) 
+                  ? data.detail.map(err => err.msg || JSON.stringify(err)).join(', ') 
+                  : (data.detail || 'ไม่สามารถแก้ไขข้อมูลได้');
+              Swal.fire('ข้อผิดพลาด', errorMsg, 'error');
           }
       } catch (e) {
           Swal.fire('ข้อผิดพลาด', 'ติดต่อเซิร์ฟเวอร์ไม่ได้', 'error');
@@ -704,5 +715,6 @@ const f = {
   td: { padding: '12px', borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem' },
   modalBackdrop: { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, backdropFilter: 'blur(3px)' },
   modalContent: { position: 'relative', width: '100%', maxWidth: '650px', background: 'white', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' },
-  closeModalBtn: { background: '#f8fafc', border: 'none', borderRadius: '50%', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', transition: 'background 0.2s' }
+  closeModalBtn: { background: '#f8fafc', border: 'none', borderRadius: '50%', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', transition: 'background 0.2s' },
+  readOnlyNote: { backgroundColor: '#fff1f0', color: '#cf1322', padding: '10px', borderRadius: '6px', fontSize: '0.85rem', textAlign: 'center', border: '1px solid #ffa39e' }
 };

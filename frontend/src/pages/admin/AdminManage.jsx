@@ -18,7 +18,7 @@ export default function AdminManage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   
   const [newAdmin, setNewAdmin] = useState({
-    staff_id: '', first_name: '', last_name: '', department: '', position: '', username: '', password: ''
+    staff_id: '', first_name: '', last_name: '', department: '', position: '', username: '', password: '', priority: 3
   });
 
   useEffect(() => {
@@ -39,7 +39,12 @@ export default function AdminManage() {
   };
 
   const handleInputChange = (e) => {
-    setNewAdmin({ ...newAdmin, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+
+    setNewAdmin({
+      ...newAdmin,
+      [name]: name === "priority" ? Number(value) : value
+    });
   };
 
   const handleAddAdmin = async (e) => {
@@ -54,7 +59,13 @@ export default function AdminManage() {
       const res = await authFetch('/api/admins', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify(newAdmin) 
+        body: JSON.stringify({
+          ...newAdmin,
+          last_name: newAdmin.last_name || null,
+          department: newAdmin.department || null,
+          position: newAdmin.position || null,
+          priority: Number(newAdmin.priority || 3)
+        })
       });
 
       
@@ -63,10 +74,20 @@ export default function AdminManage() {
       if (res.ok) {
         Swal.fire({ icon: 'success', title: 'เพิ่มแอดมินสำเร็จ', showConfirmButton: false, timer: 1500 });
         setIsAddModalOpen(false);
-        setNewAdmin({ staff_id: '', first_name: '', last_name: '', department: '', position: '', username: '', password: '' });
+        setNewAdmin({ staff_id: '', first_name: '', last_name: '', department: '', position: '', username: '', password: '', priority: 3 });
         fetchAdmins();
       } else {
-        Swal.fire('ข้อผิดพลาด', typeof data.detail === 'string' ? data.detail : 'ไม่สามารถเพิ่มแอดมินได้', 'error');
+        let errorMsg = 'ไม่สามารถเพิ่มแอดมินได้';
+        if (typeof data.detail === 'string') {
+          errorMsg = data.detail;
+        } else if (Array.isArray(data.detail)) {
+          errorMsg = data.detail
+            .map(e => (typeof e === 'string' ? e : (e.msg || e.message || JSON.stringify(e))))
+            .join(', ');
+        } else if (data.detail && typeof data.detail === 'object') {
+          errorMsg = data.detail.msg || data.detail.message || JSON.stringify(data.detail);
+        }
+        Swal.fire('ข้อผิดพลาด', String(errorMsg), 'error');
       }
     } catch (e) {
       Swal.fire('ข้อผิดพลาด', 'ติดต่อเซิร์ฟเวอร์ไม่ได้', 'error');

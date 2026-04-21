@@ -14,6 +14,7 @@ import { MAJOR_OPTIONS, YEAR_OPTIONS, COLORS_YEAR, pageStyles, tableStyles, btnS
 import { authFetch } from '../../utils/authFetch';
 
 export default function StudentInfo() {
+  const currentAdminId = sessionStorage.getItem('adminId'); // 🟢 ดึง ID ของแอดมินที่ล็อกอินอยู่
   const [students, setStudents] = useState([]);
   const [currentAcademicYear, setCurrentAcademicYear] = useState(null);
   const [filters, setFilters] = useState({ keyword: '', branch: '', yearLevel: '' });
@@ -27,6 +28,9 @@ export default function StudentInfo() {
   const [studentHistory, setStudentHistory] = useState([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
+  
+  // 🟢 เพิ่ม State เก็บระดับสิทธิ์
+  const [currentPriority, setCurrentPriority] = useState(3);
 
   const itemsPerPage = 10;
 
@@ -34,19 +38,32 @@ export default function StudentInfo() {
 
   const fetchStudentsAndYear = async () => {
     try {
-      const [resStudents, resYear] = await Promise.all([
+      const [resStudents, resYear, resAdmins] = await Promise.all([
         authFetch('/api/students'),
         authFetch('/api/current-academic-year'),
+        authFetch('/api/admins') // 🟢 ดึงข้อมูลแอดมินทั้งหมดมาเช็คสิทธิ์
       ]);
+      
       if (resStudents.ok) setStudents(await resStudents.json());
+      
       if (resYear.ok) {
         const data = await resYear.json();
         setCurrentAcademicYear(data.current_academic_year);
       }
+
+      if (resAdmins.ok) {
+        const admins = await resAdmins.json();
+        const me = admins.find(a => a.staff_id === currentAdminId);
+        if (me) setCurrentPriority(me.priority);
+      }
+
     } catch (e) {
       console.error('fetchStudentsAndYear error:', e);
     }
   };
+
+  // 🟢 กำหนดสิทธิ์: แอดมินระดับ 1 และ 2 ถึงจะจัดการข้อมูลนักศึกษาได้
+  const canManageStudent = currentPriority <= 2;
 
   const getYearStatsData = () => {
     const counts = { 'ปี 1': 0, 'ปี 2': 0, 'ปี 3': 0, 'ปี 4': 0, 'ปี 5++': 0 };
@@ -79,6 +96,7 @@ export default function StudentInfo() {
   };
 
   const startEditing = (std) => {
+    if (!canManageStudent) return; // ป้องกันเผื่อไว้
     setEditingId(std.student_id);
     setEditData({ first_name: std.first_name, last_name: std.last_name, major: std.major });
   };
@@ -86,6 +104,7 @@ export default function StudentInfo() {
   const cancelEditing = () => { setEditingId(null); setEditData({}); };
 
   const saveEdit = async (studentId) => {
+    if (!canManageStudent) return;
     try {
       const res = await authFetch(`/api/students/${studentId}`, { 
         method: 'PUT', 
@@ -106,6 +125,7 @@ export default function StudentInfo() {
   };
 
   const handleDelete = async (studentId, studentName) => {
+    if (!canManageStudent) return;
     const confirm = await Swal.fire({
       title: 'ยืนยันการลบ?',
       html: `คุณต้องการลบข้อมูลของ <b>${studentName}</b> ใช่หรือไม่?<br/><br/><small style="color:red;">การลบจะทำให้ประวัติการจองหายไปด้วย</small>`,
@@ -346,10 +366,10 @@ export default function StudentInfo() {
             <thead>
               <tr>
                 {[
-                  { label: 'รหัสนักศึกษา', key: 'student_id', w: '15%' },
-                  { label: 'ชื่อ',          key: 'first_name', w: '20%' },
-                  { label: 'นามสกุล',       key: 'last_name',  w: '20%' },
-                  { label: 'สาขา',          key: 'major',      w: '25%' },
+                  { label: 'รหัสนักศึกษา', key: 'student_id', w: canManageStudent ? '15%' : '20%' },
+                  { label: 'ชื่อ',          key: 'first_name', w: canManageStudent ? '20%' : '25%' },
+                  { label: 'นามสกุล',       key: 'last_name',  w: canManageStudent ? '20%' : '25%' },
+                  { label: 'สาขา',          key: 'major',      w: canManageStudent ? '25%' : '20%' },
                   { label: 'ชั้นปี',        key: 'year_level', w: '10%', center: true },
                 ].map(col => (
                   <th key={col.key} style={{ ...tableStyles.th, cursor: 'pointer', width: col.w }} onClick={() => handleSort(col.key)}>
@@ -358,7 +378,8 @@ export default function StudentInfo() {
                     </div>
                   </th>
                 ))}
-                <th style={{ ...tableStyles.th, textAlign: 'center', width: '10%' }}>จัดการ</th>
+                {/* 🟢 แสดงคอลัมน์จัดการ เฉพาะแอดมินระดับ 1,2 */}
+                {canManageStudent && <th style={{ ...tableStyles.th, textAlign: 'center', width: '10%' }}>จัดการ</th>}
               </tr>
             </thead>
             <tbody>
@@ -382,10 +403,12 @@ export default function StudentInfo() {
                       <td style={{ ...tableStyles.td, textAlign: 'center' }}>
                         <span style={{ fontWeight: 'bold', color: '#8b5cf6', background: '#f3e8ff', padding: '4px 10px', borderRadius: '20px', fontSize: '0.85rem' }}>{std.year_level}</span>
                       </td>
-                      <td style={{ ...tableStyles.td, textAlign: 'center' }}>
-                        <button onClick={() => saveEdit(std.student_id)} style={s.iconBtnSuccess} title="บันทึก"><RiSave3Line size={18} /></button>
-                        <button onClick={cancelEditing}                   style={s.iconBtnDanger}  title="ยกเลิก"><RiCloseLine size={18} /></button>
-                      </td>
+                      {canManageStudent && (
+                        <td style={{ ...tableStyles.td, textAlign: 'center' }}>
+                          <button onClick={() => saveEdit(std.student_id)} style={s.iconBtnSuccess} title="บันทึก"><RiSave3Line size={18} /></button>
+                          <button onClick={cancelEditing}                  style={s.iconBtnDanger}  title="ยกเลิก"><RiCloseLine size={18} /></button>
+                        </td>
+                      )}
                     </>
                   ) : (
                     <>
@@ -395,16 +418,19 @@ export default function StudentInfo() {
                       <td style={{ ...tableStyles.td, textAlign: 'center' }}>
                         <span style={{ fontWeight: 'bold', color: '#8b5cf6', background: '#f3e8ff', padding: '4px 8px', borderRadius: '20px', fontSize: '0.8rem', whiteSpace: 'nowrap', display: 'inline-block' }}>{std.year_level}</span>
                       </td>
-                      <td style={{ ...tableStyles.td, textAlign: 'center' }}>
-                        <button onClick={() => startEditing(std)} style={s.iconBtnInfo}    title="แก้ไข"><RiEdit2Fill size={18} /></button>
-                        <button onClick={() => handleDelete(std.student_id, `${std.first_name} ${std.last_name}`)} style={s.iconBtnDanger} title="ลบ"><RiDeleteBinFill size={18} /></button>
-                      </td>
+                      {/* 🟢 แสดงปุ่มจัดการ เฉพาะแอดมินระดับ 1,2 */}
+                      {canManageStudent && (
+                        <td style={{ ...tableStyles.td, textAlign: 'center' }}>
+                          <button onClick={() => startEditing(std)} style={s.iconBtnInfo}    title="แก้ไข"><RiEdit2Fill size={18} /></button>
+                          <button onClick={() => handleDelete(std.student_id, `${std.first_name} ${std.last_name}`)} style={s.iconBtnDanger} title="ลบ"><RiDeleteBinFill size={18} /></button>
+                        </td>
+                      )}
                     </>
                   )}
                 </tr>
               ))}
               {sortedStudents.length === 0 && (
-                <tr><td colSpan="6" style={{ ...tableStyles.td, textAlign: 'center', color: '#ccc', padding: '40px' }}>ไม่พบข้อมูลนักศึกษาในระบบ</td></tr>
+                <tr><td colSpan={canManageStudent ? "6" : "5"} style={{ ...tableStyles.td, textAlign: 'center', color: '#ccc', padding: '40px' }}>ไม่พบข้อมูลนักศึกษาในระบบ</td></tr>
               )}
             </tbody>
           </table>
