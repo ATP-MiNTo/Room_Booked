@@ -385,11 +385,11 @@ export default function BookingHistory() {
                           {h.image_filename ? (
                             <div
                               style={pageStyles.imageThumbnail}
-                              onClick={() => setSelectedImage(`/data/face_scanner/${h.reserve_date}/${h.image_filename}`)}
+                              onClick={() => setSelectedImage(getImageUrl(h.reserve_date, h.image_filename))}
                               onMouseEnter={(e) => e.currentTarget.lastChild.style.opacity = 1}
                               onMouseLeave={(e) => e.currentTarget.lastChild.style.opacity = 0}
                             >
-                              <img src={`/data/face_scanner/${h.reserve_date}/${h.image_filename}`} alt="Face Scan" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.src = 'https://via.placeholder.com/50?text=No+Img'; }} />
+                              <img src={getImageUrl(h.reserve_date, h.image_filename)} alt="Face Scan" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }} />
                               <div style={pageStyles.imageOverlay}><RiImageAddLine size={18} color="white" /></div>
                             </div>
                           ) : (
