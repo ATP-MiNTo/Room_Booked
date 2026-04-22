@@ -50,21 +50,10 @@ export default function BookingHistory() {
     setIsStudentLoading(false);
   };
 
-  const [cameraData, setCameraData] = useState([]);
-
   const itemsPerPage = 10;
   const timeOptions = generateTimeOptions();
 
   useEffect(() => { fetchLogs(); }, []);
-
-  // รับข้อมูลกล้องแบบ real-time ผ่าน WebSocket
-  useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/pc-updates`);
-    ws.onmessage = (e) => { try { setCameraData(JSON.parse(e.data)); } catch {} };
-    ws.onerror = () => {};
-    return () => ws.close();
-  }, []);
 
   const fetchLogs = async () => {
     try {
@@ -139,17 +128,24 @@ export default function BookingHistory() {
   const totalPages = Math.ceil(sortedLogs.length / itemsPerPage);
   const currentItems = sortedLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  const getStatusBadge = (logDate, logEndTime, seatId) => {
+  const getStatusBadge = (logDate, logEndTime, attendedStatus) => {
     if (!logDate || !logEndTime) return <span style={pageStyles.badge}>ไม่ทราบสถานะ</span>;
-    const expired = new Date(`${logDate}T${logEndTime}`) < new Date();
-    if (expired) return <span style={{ ...pageStyles.badge, background: '#f5f5f5', color: '#888' }}>หมดเวลา</span>;
-    // ถ้ายังไม่หมดเวลา → ดูข้อมูลจากกล้องว่านั่งอยู่จริงไหม
-    const cam = cameraData.find(pc => pc.pc_name === `PC${String(seatId).padStart(2, '0')}`);
-    const isSitting = cam?.available > 0;
-    if (!cam) return <span style={{ ...pageStyles.badge, background: '#e6f4ff', color: '#1677ff' }}>รอ/กำลังใช้งาน</span>;
-    return isSitting
-      ? <span style={{ ...pageStyles.badge, background: '#f6ffed', color: '#52c41a' }}>จองและนั่ง ✓</span>
-      : <span style={{ ...pageStyles.badge, background: '#fff7e6', color: '#fa8c16' }}>จองแต่ไม่มานั่ง</span>;
+    const isFuture  = new Date(`${logDate}T${logEndTime}`) > new Date();
+    const isExpired = new Date(`${logDate}T${logEndTime}`) < new Date();
+
+    // การจองในอนาคต
+    if (isFuture) return <span style={{ ...pageStyles.badge, background: '#f0f5ff', color: '#2f54eb' }}>จองล่วงหน้า</span>;
+
+    // การจองที่ผ่านมาแล้ว → ดูจาก attended_status ที่กล้องบันทึกไว้
+    if (attendedStatus === 'present')
+      return <span style={{ ...pageStyles.badge, background: '#f6ffed', color: '#52c41a' }}>จองและนั่ง ✓</span>;
+    if (attendedStatus === 'absent')
+      return <span style={{ ...pageStyles.badge, background: '#fff1f0', color: '#f5222d' }}>จองแต่ไม่มานั่ง</span>;
+
+    // ผ่านมาแล้วแต่กล้องยังไม่ได้บันทึก
+    if (isExpired) return <span style={{ ...pageStyles.badge, background: '#f5f5f5', color: '#888' }}>หมดเวลา (ไม่มีข้อมูล)</span>;
+
+    return <span style={{ ...pageStyles.badge, background: '#e6f4ff', color: '#1677ff' }}>กำลังใช้งาน</span>;
   };
 
   const SortIcon = ({ columnKey }) => {
@@ -286,7 +282,7 @@ export default function BookingHistory() {
             <tbody>
               {currentItems.map((log, i) => (
                 <tr key={i}>
-                  <td style={tableStyles.td}>{getStatusBadge(log.reserve_date, log.end_time, log.seat_id)}</td>
+                  <td style={tableStyles.td}>{getStatusBadge(log.reserve_date, log.end_time, log.attended_status)}</td>
                   <td style={tableStyles.td}>
                     <div 
                       style={{ fontWeight: '700', color: '#1677ff', cursor: 'pointer' }}
@@ -383,7 +379,7 @@ export default function BookingHistory() {
                   <tbody>
                     {studentHistory.length > 0 ? studentHistory.map((h, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                        <td style={tableStyles.td}>{getStatusBadge(h.reserve_date, h.end_time, h.seat_id)}</td>
+                        <td style={tableStyles.td}>{getStatusBadge(h.reserve_date, h.end_time, h.attended_status)}</td>
                         <td style={{ ...tableStyles.td, textAlign: 'center', fontWeight: 'bold', color: '#1677ff' }}>{h.seat_id}</td>
                         <td style={{ ...tableStyles.td, fontWeight: 'bold', color: '#444' }}>{formatThaiDate(h.reserve_date)}</td>
                         <td style={tableStyles.td}>{h.start_time?.substring(0,5)} - {h.end_time?.substring(0,5)} น.</td>

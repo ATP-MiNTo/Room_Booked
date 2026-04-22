@@ -283,6 +283,44 @@ def reserve_with_image(
         if cur: cur.close()
         if conn: conn.close()
 
+# ─────────────────────────────────────────────────────────────────
+# Endpoint สำหรับระบบกล้อง: อัปเดตสถานะการเข้านั่งของการจอง
+# PATCH /api/reservations/{reservation_id}/attendance
+# Body: { "status": "present" | "absent" }
+# ─────────────────────────────────────────────────────────────────
+from pydantic import BaseModel as _BaseModel
+
+class AttendanceUpdate(_BaseModel):
+    status: str  # "present" | "absent"
+
+@router.patch("/api/reservations/{reservation_id}/attendance")
+def update_attendance(reservation_id: int, body: AttendanceUpdate):
+    if body.status not in ("present", "absent"):
+        raise HTTPException(status_code=400, detail="status ต้องเป็น 'present' หรือ 'absent' เท่านั้น")
+    conn = None
+    cur = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE reservations SET attended_status = %s WHERE id = %s RETURNING id",
+            (body.status, reservation_id)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"ไม่พบการจอง id={reservation_id}")
+        conn.commit()
+        return {"id": reservation_id, "attended_status": body.status, "message": "อัปเดตสำเร็จ"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
 @router.get("/reservations")
 def get_all_reservations():
     conn = None
@@ -293,8 +331,8 @@ def get_all_reservations():
         current_year = get_current_academic_year_helper(cur)
 
         cur.execute("""
-            SELECT r.seat_no, r.start_time, r.end_time, r.student_id, r.image_name,
-                   s.first_name, s.last_name, s.major, r.purpose
+            SELECT r.id, r.seat_no, r.start_time, r.end_time, r.student_id, r.image_name,
+                   s.first_name, s.last_name, s.major, r.purpose, r.attended_status
             FROM reservations r
             LEFT JOIN student_info s ON r.student_id = s.student_id
             ORDER BY r.start_time DESC
@@ -302,11 +340,11 @@ def get_all_reservations():
         rows = cur.fetchall()
         return [
             {
-                "seat_id": r[0], "reserve_date": str(r[1].date()) if r[1] else None, 
-                "start_time": str(r[1].time()) if r[1] else None, "end_time": str(r[2].time()) if r[2] else None,
-                "student_id": r[3], "image_filename": r[4], "first_name": r[5] or "ไม่ระบุ",
-                "last_name": r[6] or "", "major": r[7] or "ไม่ระบุ", "purpose": r[8] or "ไม่ระบุ",
-                "year_level": get_year_level(r[3], current_year)
+                "id": r[0], "seat_id": r[1], "reserve_date": str(r[2].date()) if r[2] else None,
+                "start_time": str(r[2].time()) if r[2] else None, "end_time": str(r[3].time()) if r[3] else None,
+                "student_id": r[4], "image_filename": r[5], "first_name": r[6] or "ไม่ระบุ",
+                "last_name": r[7] or "", "major": r[8] or "ไม่ระบุ", "purpose": r[9] or "ไม่ระบุ",
+                "year_level": get_year_level(r[4], current_year), "attended_status": r[10]
             } for r in rows
         ]
     except Exception as e:
@@ -346,15 +384,15 @@ def get_student_reservations(student_id: str):
         conn = get_db()
         cur = conn.cursor()
         cur.execute("""
-            SELECT seat_no, start_time, end_time, purpose, image_name
+            SELECT id, seat_no, start_time, end_time, purpose, image_name, attended_status
             FROM reservations WHERE student_id = %s ORDER BY start_time DESC
         """, (student_id,))
         rows = cur.fetchall()
         return [
             {
-                "seat_id": r[0], "reserve_date": str(r[1].date()) if r[1] else None, 
-                "start_time": str(r[1].time()) if r[1] else None, "end_time": str(r[2].time()) if r[2] else None,
-                "purpose": r[3] or "ไม่ระบุ", "image_filename": r[4]
+                "id": r[0], "seat_id": r[1], "reserve_date": str(r[2].date()) if r[2] else None,
+                "start_time": str(r[2].time()) if r[2] else None, "end_time": str(r[3].time()) if r[3] else None,
+                "purpose": r[4] or "ไม่ระบุ", "image_filename": r[5], "attended_status": r[6]
             } for r in rows
         ]
     except Exception as e:
@@ -467,7 +505,7 @@ def get_analytics_kpi(period: str = Query("week"), ref_date: str = Query(None), 
                 # parse ISO week e.g. "2026-W15"
                 parts = ref_week.split("-W")
                 yr, wk = int(parts[0]), int(parts[1])
-                start_cur = datetime.strptime(f"{yr}-W{wk:02d}-1", "%G-W%V-%u")
+                start_cur = datetime.strptime(f"{yr}-W{wk:02d}-1", "%Y-W%W-%w")
             else:
                 start_cur = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
             end_cur   = start_cur + timedelta(weeks=1)
@@ -499,12 +537,29 @@ def get_analytics_kpi(period: str = Query("week"), ref_date: str = Query(None), 
             start_prev = datetime(yr - 1, 1, 1)
             end_prev   = start_cur
 
-        def count_reservations(s, e):
-            cur.execute("SELECT COUNT(*) FROM reservations WHERE start_time >= %s AND start_time < %s", (s, e))
+        # cap end_cur ที่ now → ไม่นับการจองในอนาคต
+        end_cur_capped = min(end_cur, now) if start_cur <= now else start_cur
+
+        def count_by_status(s, e, status=None):
+            if status:
+                cur.execute(
+                    "SELECT COUNT(*) FROM reservations WHERE start_time >= %s AND start_time < %s AND attended_status = %s",
+                    (s, e, status)
+                )
+            else:
+                cur.execute(
+                    "SELECT COUNT(*) FROM reservations WHERE start_time >= %s AND start_time < %s",
+                    (s, e)
+                )
             return cur.fetchone()[0]
 
-        total_cur  = count_reservations(start_cur, end_cur)
-        total_prev = count_reservations(start_prev, end_prev)
+        # นับเฉพาะการจองที่ผ่านมาแล้ว (ตัด future bookings ออก)
+        total_cur      = count_by_status(start_cur, end_cur_capped)
+        total_prev     = count_by_status(start_prev, end_prev)
+        present_cur    = count_by_status(start_cur, end_cur_capped, "present")
+        present_prev   = count_by_status(start_prev, end_prev, "present")
+        absent_cur     = count_by_status(start_cur, end_cur_capped, "absent")
+        absent_prev    = count_by_status(start_prev, end_prev, "absent")
 
         cur.execute("SELECT COUNT(*) FROM broken_seats WHERE status = 'broken'")
         broken = cur.fetchone()[0]
@@ -512,14 +567,20 @@ def get_analytics_kpi(period: str = Query("week"), ref_date: str = Query(None), 
         cur.execute("SELECT seat_no, note, broken_date FROM broken_seats WHERE status = 'broken' ORDER BY broken_date DESC LIMIT 10")
         broken_list = [{"seat_no": f"PC{str(r[0]).zfill(2)}", "note": r[1], "date": str(r[2].date()) if r[2] else ""} for r in cur.fetchall()]
 
-        diff = total_cur - total_prev
-        trend_pct = round((diff / total_prev * 100), 1) if total_prev > 0 else 0.0
+        def trend(cur_val, prev_val):
+            diff = cur_val - prev_val
+            pct  = round((diff / prev_val * 100), 1) if prev_val > 0 else 0.0
+            return diff, pct
+
+        diff_total,   pct_total   = trend(total_cur,   total_prev)
+        diff_present, pct_present = trend(present_cur, present_prev)
+        diff_absent,  pct_absent  = trend(absent_cur,  absent_prev)
 
         return {
-            "totalReservations": total_cur, "trendCount": diff, "trendPct": trend_pct,
+            "totalReservations":  total_cur,   "trendCount":        diff_total,   "trendPct":     pct_total,
             "broken": broken, "brokenList": broken_list,
-            "totalNormal": total_cur, "trendNormalCount": diff, "trendNormal": trend_pct,
-            "totalNoShow": 0, "trendNoShowCount": 0, "trendNoShow": 0.0,
+            "totalNormal":        present_cur,  "trendNormalCount":  diff_present, "trendNormal":  pct_present,
+            "totalNoShow":        absent_cur,   "trendNoShowCount":  diff_absent,  "trendNoShow":  pct_absent,
             "totalWalkin": 0, "trendWalkinCount": 0, "trendWalkin": 0.0
         }
     except Exception as e:
