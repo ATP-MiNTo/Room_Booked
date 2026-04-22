@@ -284,6 +284,36 @@ def reserve_with_image(
         if conn: conn.close()
 
 # ─────────────────────────────────────────────────────────────────
+# Admin: บังคับยกเลิกการจอง (Force End)
+# DELETE /api/reservations/{id}
+# ─────────────────────────────────────────────────────────────────
+@router.delete("/api/reservations/{reservation_id}")
+def delete_reservation(reservation_id: int):
+    conn = None
+    cur = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM reservations WHERE id = %s RETURNING id",
+            (reservation_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"ไม่พบการจอง id={reservation_id}")
+        conn.commit()
+        return {"message": "ยกเลิกการจองเรียบร้อยแล้ว", "id": reservation_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+# ─────────────────────────────────────────────────────────────────
 # Endpoint สำหรับระบบกล้อง: อัปเดตสถานะการเข้านั่งของการจอง
 # PATCH /api/reservations/{reservation_id}/attendance
 # Body: { "status": "present" | "absent" }

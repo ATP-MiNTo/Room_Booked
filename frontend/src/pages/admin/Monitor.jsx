@@ -31,7 +31,7 @@ export default function Monitor() {
   const fetchAllData = async () => {
     try {
       const [resBookings, resSchedules, resBroken] = await Promise.all([
-        fetch('/reservations'),
+        authFetch('/reservations'),
         authFetch('/api/system/schedules'),
         authFetch('/api/system/broken-seats')
       ]);
