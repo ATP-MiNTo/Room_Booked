@@ -535,7 +535,7 @@ def get_analytics_kpi(period: str = Query("week"), ref_date: str = Query(None), 
                 # parse ISO week e.g. "2026-W15"
                 parts = ref_week.split("-W")
                 yr, wk = int(parts[0]), int(parts[1])
-                start_cur = datetime.strptime(f"{yr}-W{wk:02d}-1", "%Y-W%W-%w")
+                start_cur = datetime.strptime(f"{yr}-W{wk:02d}-1", "%G-W%V-%u")
             else:
                 start_cur = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
             end_cur   = start_cur + timedelta(weeks=1)
