@@ -50,10 +50,21 @@ export default function BookingHistory() {
     setIsStudentLoading(false);
   };
 
+  const [cameraData, setCameraData] = useState([]);
+
   const itemsPerPage = 10;
   const timeOptions = generateTimeOptions();
 
   useEffect(() => { fetchLogs(); }, []);
+
+  // รับข้อมูลกล้องแบบ real-time ผ่าน WebSocket
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/pc-updates`);
+    ws.onmessage = (e) => { try { setCameraData(JSON.parse(e.data)); } catch {} };
+    ws.onerror = () => {};
+    return () => ws.close();
+  }, []);
 
   const fetchLogs = async () => {
     try {
@@ -128,12 +139,17 @@ export default function BookingHistory() {
   const totalPages = Math.ceil(sortedLogs.length / itemsPerPage);
   const currentItems = sortedLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  const getStatusBadge = (logDate, logEndTime) => {
+  const getStatusBadge = (logDate, logEndTime, seatId) => {
     if (!logDate || !logEndTime) return <span style={pageStyles.badge}>ไม่ทราบสถานะ</span>;
     const expired = new Date(`${logDate}T${logEndTime}`) < new Date();
-    return expired
-      ? <span style={{ ...pageStyles.badge, background: '#f5f5f5', color: '#888' }}>หมดเวลา</span>
-      : <span style={{ ...pageStyles.badge, background: '#e6f4ff', color: '#1677ff' }}>รอ/กำลังใช้งาน</span>;
+    if (expired) return <span style={{ ...pageStyles.badge, background: '#f5f5f5', color: '#888' }}>หมดเวลา</span>;
+    // ถ้ายังไม่หมดเวลา → ดูข้อมูลจากกล้องว่านั่งอยู่จริงไหม
+    const cam = cameraData.find(pc => pc.pc_name === `PC${String(seatId).padStart(2, '0')}`);
+    const isSitting = cam?.available > 0;
+    if (!cam) return <span style={{ ...pageStyles.badge, background: '#e6f4ff', color: '#1677ff' }}>รอ/กำลังใช้งาน</span>;
+    return isSitting
+      ? <span style={{ ...pageStyles.badge, background: '#f6ffed', color: '#52c41a' }}>จองและนั่ง ✓</span>
+      : <span style={{ ...pageStyles.badge, background: '#fff7e6', color: '#fa8c16' }}>จองแต่ไม่มานั่ง</span>;
   };
 
   const SortIcon = ({ columnKey }) => {
@@ -270,7 +286,7 @@ export default function BookingHistory() {
             <tbody>
               {currentItems.map((log, i) => (
                 <tr key={i}>
-                  <td style={tableStyles.td}>{getStatusBadge(log.reserve_date, log.end_time)}</td>
+                  <td style={tableStyles.td}>{getStatusBadge(log.reserve_date, log.end_time, log.seat_id)}</td>
                   <td style={tableStyles.td}>
                     <div 
                       style={{ fontWeight: '700', color: '#1677ff', cursor: 'pointer' }}
@@ -293,22 +309,13 @@ export default function BookingHistory() {
                   </td>
                   <td style={{ ...tableStyles.td, textAlign: 'center' }}>
                     {log.image_filename ? (
-                      <div
-                        style={pageStyles.imageThumbnail}
-                        // 🟢 3. เรียกใช้ getImageUrl เพื่อดึงรูปจาก Backend
+                      <img
+                        src={getImageUrl(log.reserve_date, log.image_filename)}
+                        alt="Face Scan"
+                        style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer', border: '2px solid #eee' }}
                         onClick={() => setSelectedImage(getImageUrl(log.reserve_date, log.image_filename))}
-                        onMouseEnter={(e) => e.currentTarget.lastChild.style.opacity = 1}
-                        onMouseLeave={(e) => e.currentTarget.lastChild.style.opacity = 0}
-                      >
-                        {/* 🟢 4. แสดงรูปภาพตัวอย่าง */}
-                        <img 
-                          src={getImageUrl(log.reserve_date, log.image_filename)} 
-                          alt="Face Scan" 
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                          onError={(e) => { e.target.style.display = 'none'; }} 
-                        />
-                        <div style={pageStyles.imageOverlay}><RiImageAddLine size={18} color="white" /></div>
-                      </div>
+                        onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
+                      />
                     ) : (
                       <span style={{ color: '#ccc', fontSize: '0.85rem' }}>ไม่มีรูป</span>
                     )}
@@ -376,22 +383,20 @@ export default function BookingHistory() {
                   <tbody>
                     {studentHistory.length > 0 ? studentHistory.map((h, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                        <td style={tableStyles.td}>{getStatusBadge(h.reserve_date, h.start_time, h.end_time)}</td>
+                        <td style={tableStyles.td}>{getStatusBadge(h.reserve_date, h.end_time, h.seat_id)}</td>
                         <td style={{ ...tableStyles.td, textAlign: 'center', fontWeight: 'bold', color: '#1677ff' }}>{h.seat_id}</td>
                         <td style={{ ...tableStyles.td, fontWeight: 'bold', color: '#444' }}>{formatThaiDate(h.reserve_date)}</td>
                         <td style={tableStyles.td}>{h.start_time?.substring(0,5)} - {h.end_time?.substring(0,5)} น.</td>
                         <td style={tableStyles.td}>{h.purpose}</td>
                         <td style={{ ...tableStyles.td, textAlign: 'center' }}>
                           {h.image_filename ? (
-                            <div
-                              style={pageStyles.imageThumbnail}
+                            <img
+                              src={getImageUrl(h.reserve_date, h.image_filename)}
+                              alt="Face Scan"
+                              style={{ width: '55px', height: '55px', objectFit: 'cover', borderRadius: '8px', cursor: 'pointer', border: '2px solid #eee' }}
                               onClick={() => setSelectedImage(getImageUrl(h.reserve_date, h.image_filename))}
-                              onMouseEnter={(e) => e.currentTarget.lastChild.style.opacity = 1}
-                              onMouseLeave={(e) => e.currentTarget.lastChild.style.opacity = 0}
-                            >
-                              <img src={getImageUrl(h.reserve_date, h.image_filename)} alt="Face Scan" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }} />
-                              <div style={pageStyles.imageOverlay}><RiImageAddLine size={18} color="white" /></div>
-                            </div>
+                              onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }}
+                            />
                           ) : (
                             <span style={{ color: '#ccc', fontSize: '0.85rem' }}>ไม่มีรูป</span>
                           )}
