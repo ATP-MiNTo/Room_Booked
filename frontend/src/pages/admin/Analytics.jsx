@@ -218,6 +218,8 @@ export default function Analytics() {
         if (timeFilter === 'year') {
           const monthly = Array(12).fill(0);
           raw.forEach(r => { monthly[new Date(r.date).getMonth()] += r.total; });
+          // Note: ในกราฟแนวโน้มเรายังต้องจำลองตัวเลข walk-in และ noshow เป็น 0 สำหรับแกนเวลาไว้ก่อน
+          // เพราะ API /api/bookings/range ยังไม่ได้อ่าน Log กล้องรายวันมาผสม
           setTrendData(THAI_MONTHS_SHORT.map((m, i) => ({ name: m, 'จองและนั่ง': monthly[i], 'จองแต่ไม่นั่ง': 0, 'ไม่จองแต่นั่ง': 0 })));
         } else {
           setTrendData(raw.map(r => ({ name: r.day ? `${r.day}` : formatTrendLabel(r.date), 'จองและนั่ง': r.total, 'จองแต่ไม่นั่ง': 0, 'ไม่จองแต่นั่ง': 0 })));
@@ -241,7 +243,6 @@ export default function Analytics() {
   }, [timeFilter, getApiParams, getKpiPeriodParams]);
 
   useEffect(() => { fetchAllData(); }, [fetchAllData]);
-
 
   const exportCSV = () => {
     const rows = [];
@@ -300,7 +301,7 @@ export default function Analytics() {
 
   const StatCard = ({ title, value, icon, trend, trendCount, color, bgColor }) => {
     const isPos = trendCount >= 0;
-    const isBad = title.includes('ไม่');
+    const isBad = title.includes('ไม่') || title.includes('ขัดข้อง');
     const tColor = isPos ? (isBad ? '#cf1322' : '#389e0d') : (isBad ? '#389e0d' : '#cf1322');
     return (
       <div style={{ background: 'white', padding: '20px', borderRadius: '15px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', flex: '1 1 140px', minWidth: 0, border: `1px solid ${bgColor}` }}>
@@ -314,7 +315,7 @@ export default function Analytics() {
         {trend !== undefined && trendCount !== undefined && (value > 0 || trendCount !== 0) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '15px', fontSize: '0.85rem', fontWeight: 'bold', color: tColor }}>
             {isPos ? <RiArrowUpLine /> : <RiArrowDownLine />}
-            <span>{isPos ? '+' : '-'}{Math.abs(trendCount)} คน ({Math.abs(trend)}%) เทียบช่วงก่อน</span>
+            <span>{isPos ? '+' : '-'}{Math.abs(trendCount)} ครั้ง ({Math.abs(trend)}%) เทียบช่วงก่อน</span>
           </div>
         )}
       </div>

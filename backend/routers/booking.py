@@ -2,6 +2,9 @@ import os
 import shutil
 import cloudinary
 import cloudinary.uploader
+import pandas as pd
+import glob
+import re
 from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form
 from pydantic import BaseModel
 from pydantic import BaseModel as _BaseModel
@@ -22,6 +25,8 @@ ROUTERS_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.dirname(ROUTERS_DIR)
 ROOT_DIR = os.path.dirname(BACKEND_DIR)
 BASE_UPLOAD_DIR = os.path.join(ROOT_DIR, "data", "face_scanner")
+# กำหนดโฟลเดอร์ logs ที่เก็บไฟล์จากกล้อง
+LOG_BASE_DIR = os.path.join(ROOT_DIR, "logs")
 
 if not os.path.exists(BASE_UPLOAD_DIR):
     os.makedirs(BASE_UPLOAD_DIR, exist_ok=True)
@@ -35,15 +40,15 @@ class Reservation(BaseModel):
     end_time: time
 
 class SeatStatusItem(BaseModel):
-    pc_name: str      # เช่น "PC01"
-    available: int    # 1 = มีคนนั่ง, 0 = ไม่มีคน
+    pc_name: str      
+    available: int    
     pc_on: bool = False
 
 class AttendanceSyncRequest(BaseModel):
     seats: list
 
 class AttendanceUpdate(BaseModel):
-    status: str  # "present" | "absent"
+    status: str  
 
 class EditStudentRequest(BaseModel):
     first_name: str
@@ -566,6 +571,7 @@ def get_analytics_kpi(period: str = Query("week"), ref_date: str = Query(None), 
             end_cur = start_cur + timedelta(days=1)
             start_prev = start_cur - timedelta(days=1)
             end_prev = start_cur
+            log_date_pattern = start_cur.strftime("%Y%m%d")
         elif period == "week":
             if ref_week:
                 parts = ref_week.split("-W")
@@ -576,6 +582,7 @@ def get_analytics_kpi(period: str = Query("week"), ref_date: str = Query(None), 
             end_cur = start_cur + timedelta(weeks=1)
             start_prev = start_cur - timedelta(weeks=1)
             end_prev = start_cur
+            log_date_pattern = "*"
         elif period == "month":
             if ref_month:
                 parts = ref_month.split("-")
@@ -586,12 +593,14 @@ def get_analytics_kpi(period: str = Query("week"), ref_date: str = Query(None), 
             end_cur = datetime(start_cur.year + 1, 1, 1) if start_cur.month == 12 else datetime(start_cur.year, start_cur.month + 1, 1)
             start_prev = datetime(start_cur.year - 1, 12, 1) if start_cur.month == 1 else datetime(start_cur.year, start_cur.month - 1, 1)
             end_prev = start_cur
+            log_date_pattern = start_cur.strftime("%Y%m") + "*" 
         else:  # year
             yr = int(ref_year) if ref_year else now.year
             start_cur = datetime(yr, 1, 1)
             end_cur = datetime(yr + 1, 1, 1)
             start_prev = datetime(yr - 1, 1, 1)
             end_prev = start_cur
+            log_date_pattern = start_cur.strftime("%Y") + "*"
 
         end_cur_capped = min(end_cur, now) if start_cur <= now else start_cur
 
@@ -630,12 +639,30 @@ def get_analytics_kpi(period: str = Query("week"), ref_date: str = Query(None), 
         diff_present, pct_present = trend(present_cur, present_prev)
         diff_absent, pct_absent = trend(absent_cur, absent_prev)
 
+        # 🟢 ผสานข้อมูลกล้อง
+        total_no_show_cam = 0
+        total_walkin_cam = 0
+        try:
+            unattended_pattern = os.path.join(LOG_BASE_DIR, f"pc_unattended_flags_{log_date_pattern}.csv")
+            log_files = glob.glob(unattended_pattern)
+            for file_path in log_files:
+                if os.path.exists(file_path):
+                    df = pd.read_csv(file_path)
+                    if "reason" in df.columns:
+                        total_no_show_cam += len(df[df["reason"] == 2])
+                        total_walkin_cam += len(df[df["reason"] == 1])
+        except Exception as read_err:
+            print(f"Warning: Failed to read unattended logs: {read_err}")
+
+        # ถ้า Absent จาก Web เยอะกว่า ก็เอาจาก Web ถ้ากล้องจับได้เยอะกว่าเอาจากกล้อง
+        final_no_show = max(absent_cur, total_no_show_cam)
+
         return {
             "totalReservations": total_cur, "trendCount": diff_total, "trendPct": pct_total,
             "broken": broken, "brokenList": broken_list,
             "totalNormal": present_cur, "trendNormalCount": diff_present, "trendNormal": pct_present,
-            "totalNoShow": absent_cur, "trendNoShowCount": diff_absent, "trendNoShow": pct_absent,
-            "totalWalkin": 0, "trendWalkinCount": 0, "trendWalkin": 0.0
+            "totalNoShow": final_no_show, "trendNoShowCount": diff_absent, "trendNoShow": pct_absent,
+            "totalWalkin": total_walkin_cam, "trendWalkinCount": 0, "trendWalkin": 0.0
         }
     except Exception as e:
         print(f"KPI ERROR: {e}")
