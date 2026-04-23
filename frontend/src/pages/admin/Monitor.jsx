@@ -31,7 +31,7 @@ export default function Monitor() {
   const fetchAllData = async () => {
     try {
       const [resBookings, resSchedules, resBroken] = await Promise.all([
-        fetch('/reservations'),
+        authFetch('/reservations'),
         authFetch('/api/system/schedules'),
         authFetch('/api/system/broken-seats')
       ]);
@@ -61,21 +61,8 @@ export default function Monitor() {
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
-        // กล้องเพื่อนส่งมาเป็น { type, data: [...] }
-        // รองรับทั้ง format object และ array ตรงๆ
-        const rows = Array.isArray(msg) ? msg : (msg.data ?? []);
-        setCameraData(rows);
-
-        // sync attended_status กับ DB อัตโนมัติ
-        // ส่งข้อมูลกล้องไปให้ backend ประมวลผลว่าใครมานั่ง/ไม่มา
-        if (rows.length > 0) {
-          authFetch('/api/attendance/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ seats: rows }),
-          }).catch(() => {});  // silent fail ไม่ให้กระทบ UI
-        }
+        const data = JSON.parse(event.data);
+        setCameraData(data);
       } catch (error) {
         console.error("Error parsing camera data:", error);
       }
@@ -85,11 +72,9 @@ export default function Monitor() {
   }, []);
 
   const getSeatData = (seatNumber) => {
-    // กล้องเพื่อนส่ง pc_name แบบ zero-padded เช่น PC01, PC02
-    const paddedNum = String(seatNumber).padStart(2, '0');
-    const camInfo = cameraData.find(pc => pc.pc_name === `PC${paddedNum}` || pc.pc_name === `PC${seatNumber}`) || { available: 0, pc_on: false };
-    const isSitting = camInfo.available > 0;  // 1 = มีคนนั่ง, 0 = ไม่มีคน
-    const isPcOn = camInfo.pc_on;             // true = หน้าจอเปิด, false = ปิด
+    const camInfo = cameraData.find(pc => pc.pc_name === `PC${seatNumber}`) || { available: 0, pc_on: false };
+    const isSitting = camInfo.available > 0; 
+    const isPcOn = camInfo.pc_on; 
 
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
