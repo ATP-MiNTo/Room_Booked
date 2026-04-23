@@ -4,7 +4,7 @@ import {
   RiBarChartBoxLine, RiUserFollowLine, RiUserUnfollowLine,
   RiUserForbidLine, RiToolsFill, RiArrowUpLine, RiArrowDownLine, RiCalendar2Line,
   RiAlertFill, RiComputerLine, RiDownloadLine, RiRefreshLine,
-  RiPieChartLine, RiTimerLine, RiGroupLine, RiFilter3Fill, RiArrowDownSLine,
+  RiPieChartLine, RiTimerLine, RiGroupLine,
   RiArrowLeftLine, RiArrowRightLine
 } from 'react-icons/ri';
 import {
@@ -146,8 +146,6 @@ export default function Analytics() {
 
   const [isLoading,      setIsLoading]      = useState(true);
   const [error,          setError]          = useState(null);
-  const [isFilterOpen,   setIsFilterOpen]   = useState(false);
-  const [advancedFilters, setAdvancedFilters] = useState({ major: '', year_level: '' });
 
   const [kpiData,         setKpiData]         = useState({});
   const [trendData,       setTrendData]       = useState([]);
@@ -158,32 +156,6 @@ export default function Analytics() {
   const [byYear,          setByYear]          = useState([]);
 
   const filterLabel = { today: 'รายวัน', week: 'รายสัปดาห์', month: 'รายเดือน', year: 'รายปี' };
-
-  const getApiParams = useCallback(() => {
-    const base = {
-      ...(advancedFilters.major      && { major:      advancedFilters.major }),
-      ...(advancedFilters.year_level && { year_level: advancedFilters.year_level }),
-    };
-    if (timeFilter === 'today') return { ...base, start: selDay, end: selDay };
-    if (timeFilter === 'week') {
-      const mon = getWeekMonday(selWeek.year, selWeek.week);
-      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-      return { ...base, start: fmtDate(mon), end: fmtDate(sun) };
-    }
-    if (timeFilter === 'month') return { ...base, month: `${selMonth.year}-${pad(selMonth.month)}` };
-    return { ...base, year: String(selYear) };
-  }, [timeFilter, selDay, selWeek, selMonth, selYear, advancedFilters]);
-
-  const getKpiPeriodParams = useCallback(() => {
-    const base = {
-      ...(advancedFilters.major      && { major:      advancedFilters.major }),
-      ...(advancedFilters.year_level && { year_level: advancedFilters.year_level }),
-    };
-    if (timeFilter === 'today')  return { ...base, period: 'today', ref_date: selDay };
-    if (timeFilter === 'week')   return { ...base, period: 'week',  ref_week: `${selWeek.year}-W${pad(selWeek.week)}` };
-    if (timeFilter === 'month')  return { ...base, period: 'month', ref_month: `${selMonth.year}-${pad(selMonth.month)}` };
-    return { ...base, period: 'year', ref_year: String(selYear) };
-  }, [timeFilter, selDay, selWeek, selMonth, selYear, advancedFilters]);
 
   const buildQuery = (base, params) => {
     const q = new URLSearchParams();
@@ -198,6 +170,36 @@ export default function Analytics() {
     if (timeFilter === 'month')  return `${d.getDate()} ${THAI_MONTHS_SHORT[d.getMonth()]}`;
     return THAI_MONTHS_SHORT[d.getMonth()];
   };
+
+  const getApiParams = useCallback(() => {
+    if (timeFilter === 'today') {
+      return { start: selDay, end: selDay };
+    }
+    if (timeFilter === 'week') {
+      const { year, week } = selWeek;
+      const mon = getWeekMonday(year, week);
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      return { start: fmtDate(mon), end: fmtDate(sun) };
+    }
+    if (timeFilter === 'month') {
+      return { month: `${selMonth.year}-${pad(selMonth.month)}` };
+    }
+    return { year: selYear };
+  }, [timeFilter, selDay, selWeek, selMonth, selYear]);
+
+  const getKpiPeriodParams = useCallback(() => {
+    if (timeFilter === 'today') {
+      return { period: 'today', ref_date: selDay };
+    }
+    if (timeFilter === 'week') {
+      return { period: 'week', ref_week: `${selWeek.year}-W${pad(selWeek.week)}` };
+    }
+    if (timeFilter === 'month') {
+      return { period: 'month', ref_month: `${selMonth.year}-${pad(selMonth.month)}` };
+    }
+    return { period: 'year', ref_year: selYear };
+  }, [timeFilter, selDay, selWeek, selMonth, selYear]);
 
   const fetchAllData = useCallback(async () => {
     setIsLoading(true);
@@ -250,9 +252,6 @@ export default function Analytics() {
   }, [timeFilter, getApiParams, getKpiPeriodParams]);
 
   useEffect(() => { fetchAllData(); }, [fetchAllData]);
-
-  const handleAdvancedFilterChange = (e) => setAdvancedFilters({ ...advancedFilters, [e.target.name]: e.target.value });
-  const resetAdvancedFilters = () => setAdvancedFilters({ major: '', year_level: '' });
 
   const exportCSV = () => {
     const rows = [];
@@ -310,7 +309,7 @@ export default function Analytics() {
   }, [timeFilter, selDay, selWeek, selMonth, selYear]);
 
   const StatCard = ({ title, value, icon, trend, trendCount, color, bgColor }) => {
-    const isPos = trendCount >= 0;
+    const isPos = (trendCount ?? 0) >= 0;
     const isBad = title.includes('ไม่');
     const tColor = isPos ? (isBad ? '#cf1322' : '#389e0d') : (isBad ? '#389e0d' : '#cf1322');
     return (
@@ -361,42 +360,6 @@ export default function Analytics() {
           <DateRangeSelector {...currentDateSelector} />
         </div>
 
-        <div style={{ marginBottom: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', borderRadius: '12px' }}>
-          <div
-            onClick={() => setIsFilterOpen(!isFilterOpen)}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '14px 20px',
-              background: isFilterOpen ? '#fafafa' : 'white',
-              borderRadius: isFilterOpen ? '12px 12px 0 0' : '12px',
-              borderLeft: '4px solid #1677ff',
-              cursor: 'pointer', userSelect: 'none',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <RiFilter3Fill color="#1677ff" size={20} />
-              <div>
-                <div style={{ fontWeight: '700', color: '#2c3e50', fontSize: '1rem' }}>Advanced Filters</div>
-                <div style={{ fontSize: '0.82rem', color: '#aaa', marginTop: '1px' }}>กรองตามสาขา / ชั้นปี</div>
-              </div>
-            </div>
-            <span style={{ color: '#bbb', display: 'inline-block', transform: isFilterOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.25s' }}>
-              <RiArrowDownSLine size={22} />
-            </span>
-          </div>
-          <div style={{ maxHeight: isFilterOpen ? '200px' : '0', overflow: 'hidden', transition: 'max-height 0.35s ease', background: 'white', borderRadius: '0 0 12px 12px' }}>
-            <div style={{ padding: '16px 20px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <select name="major" value={advancedFilters.major} onChange={handleAdvancedFilterChange} style={s.select}>
-                {MAJOR_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              <select name="year_level" value={advancedFilters.year_level} onChange={handleAdvancedFilterChange} style={{ ...s.select, flex: '0 1 160px' }}>
-                {YEAR_OPTIONS.slice(0, 6).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              <button onClick={resetAdvancedFilters} style={s.resetBtn}><RiRefreshLine /> ล้างตัวกรอง</button>
-            </div>
-          </div>
-        </div>
-
         {error && (
           <div style={{ background: '#fff1f0', border: '1px solid #ffa39e', borderRadius: '10px', padding: '15px 20px', marginBottom: '20px', color: '#cf1322', fontWeight: 'bold' }}>
             {error}
@@ -415,7 +378,7 @@ export default function Analytics() {
             </div>
 
             <div style={{ ...pageStyles.card, background: '#fff1f0', border: '1px solid #ffa39e', marginBottom: '30px' }}>
-                <h3 style={{ ...styles.cardTitle, color: '#cf1322' }}><RiAlertFill /> เครื่องที่แจ้งขัดข้อง ({kpiData.broken || 0})</h3>
+                <h3 style={{ ...s.cardTitle, color: '#cf1322' }}><RiAlertFill /> เครื่องที่แจ้งขัดข้อง ({kpiData.broken || 0})</h3>
                 {brokenSeatsList.length > 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
                     {brokenSeatsList.map((item, i) => (

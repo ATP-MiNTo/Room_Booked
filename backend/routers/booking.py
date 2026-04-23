@@ -704,7 +704,7 @@ def get_by_major(start: str = Query(None), end: str = Query(None), month: str = 
         cur = conn.cursor()
         params = []
         clause = _build_date_filter(params, month=month, year=year, start=start, end=end, table_prefix="r.")
-        cur.execute(f"SELECT COALESCE(s.major, 'ไม่ระบุ') as major, COUNT(*) as total FROM reservations r LEFT JOIN student_info s ON r.student_id = s.student_id WHERE 1=1{clause} GROUP BY major ORDER BY total DESC", params)
+        cur.execute(f"SELECT COALESCE(s.major,'ไม่ระบุ') as major, COUNT(*) as total FROM reservations r LEFT JOIN student_info s ON r.student_id=s.student_id WHERE r.attended_status IS NOT NULL{clause} GROUP BY major ORDER BY total DESC", params)
         rows = cur.fetchall()
         return [{"major": r[0], "total": r[1]} for r in rows]
     except Exception as e:
@@ -722,20 +722,21 @@ def get_by_year(start: str = Query(None), end: str = Query(None), month: str = Q
         cur = conn.cursor()
         params = []
         clause = _build_date_filter(params, month=month, year=year, start=start, end=end, table_prefix="r.")
-        cur.execute(f"SELECT s.student_id, COUNT(*) as total FROM reservations r JOIN student_info s ON r.student_id = s.student_id WHERE s.student_id IS NOT NULL{clause} GROUP BY s.student_id", params)
+        cur.execute(f"SELECT s.student_id, COUNT(*) as total FROM reservations r JOIN student_info s ON r.student_id=s.student_id WHERE s.student_id IS NOT NULL AND r.attended_status IS NOT NULL{clause} GROUP BY s.student_id", params)
         rows = cur.fetchall()
 
         current_academic_year = get_current_academic_year_helper(cur)
-        year_counts = {"ปี 1": 0, "ปี 2": 0, "ปี 3": 0, "ปี 4": 0, "ปี 5++": 0, "รีไทร์": 0, "Error": 0}
+        year_counts = {"ปี 1":0,"ปี 2":0,"ปี 3":0,"ปี 4":0,"ปี 5++":0,"รีไทร์":0,"Error":0}
 
-        for row in rows:
-            yl_text = get_year_level(str(row[0]).strip(), current_academic_year)
-            year_counts[yl_text] = year_counts.get(yl_text, 0) + row[1]
+        for r in rows:
+            yl = get_year_level(str(r[0]).strip(), current_academic_year)
+            year_counts[yl] = year_counts.get(yl,0) + r[1]
 
-        result = [{"year": k, "total": v} for k, v in year_counts.items() if v > 0]
-        order = {"ปี 1": 1, "ปี 2": 2, "ปี 3": 3, "ปี 4": 4, "ปี 5++": 5, "รีไทร์": 6, "Error": 7}
-        result.sort(key=lambda x: order.get(x["year"], 99))
+        result = [{"year":k,"total":v} for k,v in year_counts.items() if v>0]
+        order = {"ปี 1":1,"ปี 2":2,"ปี 3":3,"ปี 4":4,"ปี 5++":5,"รีไทร์":6,"Error":7}
+        result.sort(key=lambda x: order.get(x["year"],99))
         return result
+
     except Exception as e:
         print(f"DATABASE ERROR (GET /api/analytics/by-year): {e}")
         raise HTTPException(status_code=500, detail="ไม่สามารถดึงข้อมูลชั้นปีได้")
