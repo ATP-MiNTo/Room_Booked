@@ -175,11 +175,15 @@ export default function Analytics() {
   }, [timeFilter, selDay, selWeek, selMonth, selYear, advancedFilters]);
 
   const getKpiPeriodParams = useCallback(() => {
-    if (timeFilter === 'today')  return { period: 'today', ref_date: selDay };
-    if (timeFilter === 'week')   return { period: 'week',  ref_week: `${selWeek.year}-W${pad(selWeek.week)}` };
-    if (timeFilter === 'month')  return { period: 'month', ref_month: `${selMonth.year}-${pad(selMonth.month)}` };
-    return { period: 'year', ref_year: String(selYear) };
-  }, [timeFilter, selDay, selWeek, selMonth, selYear]);
+    const base = {
+      ...(advancedFilters.major      && { major:      advancedFilters.major }),
+      ...(advancedFilters.year_level && { year_level: advancedFilters.year_level }),
+    };
+    if (timeFilter === 'today')  return { ...base, period: 'today', ref_date: selDay };
+    if (timeFilter === 'week')   return { ...base, period: 'week',  ref_week: `${selWeek.year}-W${pad(selWeek.week)}` };
+    if (timeFilter === 'month')  return { ...base, period: 'month', ref_month: `${selMonth.year}-${pad(selMonth.month)}` };
+    return { ...base, period: 'year', ref_year: String(selYear) };
+  }, [timeFilter, selDay, selWeek, selMonth, selYear, advancedFilters]);
 
   const buildQuery = (base, params) => {
     const q = new URLSearchParams();

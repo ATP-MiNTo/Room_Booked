@@ -190,17 +190,24 @@ export default function SystemManage() {
     const note = [...selectedIssues, otherIssue].filter(i => i.trim()).join(', ');
     if (!note) return Swal.fire('แจ้งเตือน', 'กรุณาระบุอาการเสีย', 'warning');
     
-    const res = await authFetch('/api/system/report-broken', { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ seat_no: brokenData.seat_no, note, admin_id: currentAdminId}) 
-    });
+    try {
+      const res = await authFetch('/api/system/report-broken', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ seat_no: parseInt(brokenData.seat_no), note, admin_id: currentAdminId }) 
+      });
 
-    if (res.ok) {
-        Swal.fire('สำเร็จ', 'บันทึกแจ้งเครื่องเสียเรียบร้อย', 'success');
+      if (res.ok) {
+        Swal.fire({ icon: 'success', title: 'สำเร็จ', text: 'บันทึกแจ้งเครื่องเสียเรียบร้อย', showConfirmButton: false, timer: 1500 });
         setBrokenData({ seat_no: null }); setSelectedIssues([]); setOtherIssue('');
         setOpenPanel(null);
         fetchData();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        Swal.fire('ข้อผิดพลาด', err.detail || `เกิดข้อผิดพลาด (${res.status})`, 'error');
+      }
+    } catch (e) {
+      Swal.fire('ข้อผิดพลาด', 'ติดต่อเซิร์ฟเวอร์ไม่ได้', 'error');
     }
   };
 
@@ -713,7 +720,7 @@ const f = {
   table: { width: '100%', borderCollapse: 'collapse' },
   th: { background: '#f8f9fa', textAlign: 'left', padding: '12px', borderBottom: '2px solid #eee', fontSize: '0.85rem' },
   td: { padding: '12px', borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem' },
-  modalBackdrop: { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, backdropFilter: 'blur(3px)' },
+  modalBackdrop: { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, backdropFilter: 'blur(3px)' },
   modalContent: { position: 'relative', width: '100%', maxWidth: '650px', background: 'white', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' },
   closeModalBtn: { background: '#f8fafc', border: 'none', borderRadius: '50%', color: '#64748b', cursor: 'pointer', padding: '6px', display: 'flex', transition: 'background 0.2s' },
   readOnlyNote: { backgroundColor: '#fff1f0', color: '#cf1322', padding: '10px', borderRadius: '6px', fontSize: '0.85rem', textAlign: 'center', border: '1px solid #ffa39e' }

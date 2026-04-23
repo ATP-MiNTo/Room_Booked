@@ -78,7 +78,7 @@ const FaceScanner = ({ onScanComplete, onCancel }) => {
           }
 
           if (box.width < 100) {
-              setStatus('ขยับเข้ามาใกล้ๆ');
+              setStatus('ขยับเข้ามาใกล้ ๆ');
               blinkDuration.current = 0;
               return;
           }

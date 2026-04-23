@@ -437,13 +437,13 @@ export default function StudentInfo() {
         </div>
 
         {/* Pagination */}
-        {totalPages > 1 && (
+        {sortedStudents.length > 0 && (
           <div style={pageStyles.pagination}>
             <button style={{ ...pageStyles.pageBtn, opacity: currentPage === 1 ? 0.5 : 1, minWidth: '90px', justifyContent: 'center' }} onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} disabled={currentPage === 1}>
               <RiArrowLeftSLine size={18} /> ก่อนหน้า
             </button>
             <span style={{ fontSize: '0.9rem', color: '#555', fontWeight: 'bold', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <span>หน้า {currentPage} จาก {totalPages}</span>
+              <span>{totalPages > 1 ? `หน้า ${currentPage} จาก ${totalPages}` : 'หน้าเดียว'}</span>
               <span style={{ color: '#aaa', fontWeight: 'normal', fontSize: '0.82rem' }}>({sortedStudents.length} คน)</span>
             </span>
             <button style={{ ...pageStyles.pageBtn, opacity: currentPage === totalPages ? 0.5 : 1, minWidth: '90px', justifyContent: 'center' }} onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>
