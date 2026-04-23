@@ -284,6 +284,84 @@ def reserve_with_image(
         if conn: conn.close()
 
 # ─────────────────────────────────────────────────────────────────
+# Sync attended_status จากข้อมูลกล้อง (เรียกโดย Monitor.jsx)
+# POST /api/attendance/sync
+# Body: { "seats": [{ "pc_name": "PC01", "available": 1, "pc_on": true }, ...] }
+# ─────────────────────────────────────────────────────────────────
+class SeatStatusItem(_BaseModel):
+    pc_name: str      # เช่น "PC01"
+    available: int    # 1 = มีคนนั่ง, 0 = ไม่มีคน
+    pc_on: bool = False
+
+class AttendanceSyncRequest(_BaseModel):
+    seats: list  # list of SeatStatusItem
+
+@router.post("/api/attendance/sync")
+def sync_attendance(body: AttendanceSyncRequest):
+    """
+    รับสถานะจากกล้องทุกที่นั่ง แล้ว match กับการจองที่ active ตอนนี้
+    - มีคนนั่ง (available=1) + มีการจอง  → attended_status = 'present'
+    - ไม่มีคนนั่ง (available=0) + มีการจอง + หมดเวลาแล้ว → attended_status = 'absent'
+    """
+    conn = None
+    cur = None
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        thai_tz = timezone(timedelta(hours=7))
+        now = datetime.now(thai_tz).replace(tzinfo=None)
+
+        # ดึงการจองที่ active ตอนนี้ทั้งหมด
+        cur.execute("""
+            SELECT id, seat_no, start_time, end_time
+            FROM reservations
+            WHERE start_time <= %s AND end_time > %s
+        """, (now, now))
+        active_reservations = {str(row[1]): {"id": row[0], "start": row[2], "end": row[3]}
+                               for row in cur.fetchall()}
+
+        updated = []
+        for seat in body.seats:
+            # แปลง PC01 → 1, PC17 → 17
+            seat_no = str(int(''.join(filter(str.isdigit, str(seat["pc_name"])))))
+            is_sitting = int(seat.get("available", 0)) > 0
+
+            if seat_no not in active_reservations:
+                continue  # ไม่มีการจอง → ข้าม
+
+            reservation_id = active_reservations[seat_no]["id"]
+            status = "present" if is_sitting else None  # absent เซตตอนหมดเวลาเท่านั้น
+
+            if status:
+                cur.execute(
+                    "UPDATE reservations SET attended_status = %s WHERE id = %s AND attended_status IS NULL",
+                    (status, reservation_id)
+                )
+                if cur.rowcount > 0:
+                    updated.append({"seat_no": seat_no, "reservation_id": reservation_id, "status": status})
+
+        # ดึงการจองที่หมดเวลาแล้วภายใน 30 นาที และยังไม่มีสถานะ → set absent
+        cur.execute("""
+            UPDATE reservations
+            SET attended_status = 'absent'
+            WHERE end_time <= %s AND end_time > %s AND attended_status IS NULL
+            RETURNING id, seat_no
+        """, (now, now - timedelta(minutes=30)))
+        absent_rows = cur.fetchall()
+        for row in absent_rows:
+            updated.append({"seat_no": str(row[1]), "reservation_id": row[0], "status": "absent"})
+
+        conn.commit()
+        return {"synced": len(updated), "updated": updated}
+    except Exception as e:
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+# ─────────────────────────────────────────────────────────────────
 # Admin: บังคับยกเลิกการจอง (Force End)
 # DELETE /api/reservations/{id}
 # ─────────────────────────────────────────────────────────────────
