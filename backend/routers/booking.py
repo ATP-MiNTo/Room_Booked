@@ -135,18 +135,16 @@ def get_booked_seats(
         conn = get_db()
         cur = conn.cursor()
 
-        start_dt = datetime.combine(reserve_date, start_time)
-        end_dt = datetime.combine(reserve_date, end_time)
-
-        seat_statuses = {}
-
+        # แก้ไข Query: ใช้ ::time เพื่อให้ PostgreSQL เปรียบเทียบเฉพาะส่วนของเวลาได้ถูกต้อง
         cur.execute("""
             SELECT DISTINCT seat_no
             FROM reservations
             WHERE DATE(start_time) = %s
-            AND start_time < %s 
-            AND end_time > %s
-        """, (reserve_date, end_dt, start_dt))
+            AND (start_time::time) < %s 
+            AND (end_time::time) > %s
+        """, (reserve_date, end_time, start_time))
+        
+        seat_statuses = {}
         for row in cur.fetchall():
             seat_statuses[str(row[0])] = {"status": "booked", "reason": "มีผู้จองแล้ว"}
 
@@ -283,8 +281,8 @@ def reserve_with_image(
             reserve_date,
             reserve_date,
             seat_id,
-            end_naive,
-            start_naive
+            end_time, # ใช้เฉพาะ time object
+            start_time # ใช้เฉพาะ time object
         ))
 
         if cur.fetchone():
@@ -298,11 +296,15 @@ def reserve_with_image(
         if cur.fetchone():
             raise HTTPException(status_code=409, detail="ที่นั่งนี้เครื่องเสีย")
 
+        # แก้ไข Query จองซ้ำ: ใช้ ::time เพื่อเปรียบเทียบเฉพาะเวลา
         cur.execute("""
             SELECT 1 FROM reservations
-            WHERE seat_no = %s AND start_time < %s AND end_time > %s
+            WHERE seat_no = %s 
+            AND DATE(start_time) = %s
+            AND (start_time::time) < %s 
+            AND (end_time::time) > %s
             FOR UPDATE
-        """, (seat_id, end_naive, start_naive))
+        """, (seat_id, reserve_date, end_time, start_time))
 
         if cur.fetchone():
             raise HTTPException(status_code=409, detail="ที่นั่งนี้ถูกจองไปแล้ว กรุณาเลือกรอบเวลาอื่น")
