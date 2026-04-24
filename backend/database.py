@@ -13,7 +13,7 @@ def get_db():
 def init_sequences():
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT setval('reservations_id_seq', COALESCE((SELECT MAX(id) FROM reservations), 0))")
+    cur.execute("SELECT setval('reservations_id_seq', COALESCE((SELECT MAX(id) FROM reservations), 1))")
     conn.commit()
     cur.close()
     conn.close()
