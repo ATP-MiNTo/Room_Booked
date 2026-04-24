@@ -500,11 +500,11 @@ export default function StudentInfo() {
                           {history.image_filename ? (
                             <div
                               style={pageStyles.imageThumbnail}
-                              onClick={() => setSelectedImage(`/data/face_scanner/${history.reserve_date}/${history.image_filename}`)}
+                              onClick={() => setSelectedImage(history.image_filename?.startsWith('http') ? history.image_filename : `/data/face_scanner/${history.reserve_date}/${history.image_filename}`)}
                               onMouseEnter={(e) => e.currentTarget.lastChild.style.opacity = 1}
                               onMouseLeave={(e) => e.currentTarget.lastChild.style.opacity = 0}
                             >
-                              <img src={`/data/face_scanner/${history.reserve_date}/${history.image_filename}`} alt="Face Scan" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.src = 'https://via.placeholder.com/50?text=No+Img'; }} />
+                              <img src={history.image_filename?.startsWith('http') ? history.image_filename : `/data/face_scanner/${history.reserve_date}/${history.image_filename}` } alt="Face Scan" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.src = 'https://via.placeholder.com/50?text=No+Img'; }} />
                               <div style={pageStyles.imageOverlay}><RiImageAddLine size={18} color="white" /></div>
                             </div>
                           ) : (
