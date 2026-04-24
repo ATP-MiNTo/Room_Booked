@@ -39,6 +39,23 @@ def _require_config_value(config, key):
     return config[key]
 
 
+def _normalize_pc_conf_threshold_map(raw_map):
+    normalized = {}
+    if not isinstance(raw_map, dict):
+        return normalized
+
+    for key, value in raw_map.items():
+        pc_name = str(key).strip()
+        if not pc_name:
+            continue
+        try:
+            threshold = float(value)
+        except Exception:
+            continue
+        normalized[pc_name] = max(0.0, min(1.0, threshold))
+    return normalized
+
+
 def load_runtime_config(config_path):
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -100,6 +117,8 @@ Windows_height = int(_require_config_value(CONFIG, "WINDOWS_HEIGHT"))
 CONF_THRESHOLD = float(_require_config_value(CONFIG, "CONF_THRESHOLD"))
 IOU_THRESHOLD = float(_require_config_value(CONFIG, "IOU_THRESHOLD"))
 SAVE_INTERVAL_SEC = float(_require_config_value(CONFIG, "SAVE_INTERVAL_SEC"))
+PC_CONF_THRESHOLD_OVERRIDES = _normalize_pc_conf_threshold_map(CONFIG.get("PC_CONF_THRESHOLD_OVERRIDES", {}))
+MIN_CONF_THRESHOLD = min([CONF_THRESHOLD] + list(PC_CONF_THRESHOLD_OVERRIDES.values())) if PC_CONF_THRESHOLD_OVERRIDES else CONF_THRESHOLD
 
 # Detection schedule settings
 DETECTION_START_HOUR_24 = int(_require_config_value(CONFIG, "DETECTION_START_HOUR_24"))
@@ -227,7 +246,7 @@ except Exception:
 # set model confidence threshold globally to reduce post-processing
 try:
     # some ultralytics versions expose a conf attribute
-    model.conf = CONF_THRESHOLD
+    model.conf = MIN_CONF_THRESHOLD
     model.iou = IOU_THRESHOLD
 except Exception:
     # ignore if attribute not present
@@ -288,6 +307,12 @@ def run_model_inference(frame):
             except Exception:
                 raise
 
+
+def get_conf_threshold_for_pc(pc_name):
+    if not pc_name:
+        return float(CONF_THRESHOLD)
+    return float(PC_CONF_THRESHOLD_OVERRIDES.get(str(pc_name).strip(), CONF_THRESHOLD))
+
 def to_safe_label(value):
     """Convert a display label into a filesystem-safe name."""
     cleaned = "".join((c if c.isalnum() or c in ("-", "_") else "_") for c in str(value).strip())
@@ -309,6 +334,17 @@ def format_video_clock(video_seconds):
     minutes = (total % 3600) // 60
     seconds = total % 60
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def format_compact_video_clock(video_seconds):
+    safe_seconds = max(0.0, float(video_seconds))
+    total = int(safe_seconds)
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    seconds = total % 60
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def get_video_frame_time_seconds(cap, cam_data):
@@ -1270,14 +1306,26 @@ def compute_eval_metrics_for_rows(rows, sample_interval_sec=EVAL_SAMPLE_SEC):
     }
 
 
-def build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0):
+def build_occupancy_intervals_from_detail(
+    detail_rows,
+    pc_name,
+    debounce_sec=2.0,
+    sample_interval_sec=1.0,
+    cam_name=None,
+):
     """
     Build continuous occupancy intervals from per-second detail samples.
     Filters for given pc_name and groups consecutive occupied_pred=1 samples.
     Debounce: ignore bursts shorter than debounce_sec.
     Returns list of (start_ts, end_ts) tuples in seconds.
     """
-    pc_rows = [r for r in detail_rows if r.get("pc_name") == pc_name]
+    pc_rows = []
+    for row in detail_rows:
+        if row.get("pc_name") != pc_name:
+            continue
+        if cam_name is not None and str(row.get("cam_name", "")) != str(cam_name):
+            continue
+        pc_rows.append(row)
     if not pc_rows:
         return []
     
@@ -1302,7 +1350,7 @@ def build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0
             if in_interval and last_occupied is not None:
                 duration = last_occupied - interval_start
                 if duration >= debounce_sec:
-                    intervals.append((interval_start, last_occupied + 1.0))  # +1 to include end second
+                    intervals.append((interval_start, last_occupied + float(sample_interval_sec)))
                 in_interval = False
                 last_occupied = None
     
@@ -1310,7 +1358,7 @@ def build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0
     if in_interval and last_occupied is not None:
         duration = last_occupied - interval_start
         if duration >= debounce_sec:
-            intervals.append((interval_start, last_occupied + 1.0))
+            intervals.append((interval_start, last_occupied + float(sample_interval_sec)))
     
     return sorted(intervals)
 
@@ -1387,7 +1435,12 @@ def compute_duration_metrics(detail_rows, gt_lookup, pc_name, video_end_ts=None)
     pc_name: PC to evaluate
     video_end_ts: unix timestamp of video end (for GT interval closure)
     """
-    pred_intervals = build_occupancy_intervals_from_detail(detail_rows, pc_name, debounce_sec=2.0)
+    pred_intervals = build_occupancy_intervals_from_detail(
+        detail_rows,
+        pc_name,
+        debounce_sec=2.0,
+        sample_interval_sec=EVAL_SAMPLE_SEC,
+    )
     gt_intervals = build_gt_occupancy_intervals(gt_lookup, pc_name, video_end_ts)
     
     if not gt_intervals:
@@ -1431,6 +1484,59 @@ def compute_duration_metrics(detail_rows, gt_lookup, pc_name, video_end_ts=None)
         "gt_intervals": len(gt_intervals),
         "pred_intervals": len(pred_intervals),
     }
+
+
+def build_eval_detection_period_rows(cams):
+    rows = []
+    for cam_idx, cam_data in cams.items():
+        detail_rows = cam_data.get("eval_detail_rows", [])
+        if not detail_rows:
+            continue
+
+        cam_name = str(cam_data.get("name", ""))
+        source_video = os.path.basename(str(cam_data.get("source_path", "")))
+        model_name = MODEL_NAME_FOR_LOG
+        pc_names = sorted(
+            {str(row.get("pc_name", "")).strip() for row in detail_rows if str(row.get("pc_name", "")).strip()},
+            key=pc_name_sort_key,
+        )
+
+        for pc_name in pc_names:
+            periods = build_occupancy_intervals_from_detail(
+                detail_rows,
+                pc_name,
+                debounce_sec=0.0,
+                sample_interval_sec=EVAL_SAMPLE_SEC,
+                cam_name=cam_name,
+            )
+            for start_ts, end_ts in periods:
+                start_clock = format_compact_video_clock(start_ts)
+                end_clock = format_compact_video_clock(end_ts)
+                rows.append(
+                    {
+                        "eval_tag": EVAL_TAG,
+                        "model_name": model_name,
+                        "source_video": source_video,
+                        "cam_idx": cam_idx,
+                        "cam_name": cam_name,
+                        "pc_name": pc_name,
+                        "start_clock": start_clock,
+                        "end_clock": end_clock,
+                        "period": f"{start_clock} - {end_clock}",
+                        "start_t_sec": round(float(start_ts), 2),
+                        "end_t_sec": round(float(end_ts), 2),
+                        "duration_sec": round(max(0.0, float(end_ts) - float(start_ts)), 2),
+                    }
+                )
+
+    rows.sort(
+        key=lambda row: (
+            pc_name_sort_key(row.get("pc_name", "")),
+            str(row.get("cam_name", "")),
+            float(row.get("start_t_sec", 0.0)),
+        )
+    )
+    return rows
 
 
 def run_eval_only_mode(eval_log_root, groundtruth_dir):
@@ -1570,11 +1676,20 @@ def write_eval_outputs(cams):
     ]
     pd.DataFrame(summary_rows, columns=summary_columns).to_csv(summary_path, index=False)
 
+    periods_rows = build_eval_detection_period_rows(cams)
+    periods_path = os.path.join(EVAL_LOG_ROOT, f"eval_pc_detection_periods_{EVAL_TAG}.csv")
+    periods_columns = [
+        "pc_name", "cam_name", "start_clock", "end_clock", "period", "duration_sec",
+        "start_t_sec", "end_t_sec", "source_video", "model_name", "eval_tag", "cam_idx",
+    ]
+    pd.DataFrame(periods_rows, columns=periods_columns).to_csv(periods_path, index=False)
+
     print("\n=== Eval Summary ===")
     print(f"Eval tag: {EVAL_TAG}")
     print(f"Model: {MODEL_NAME_FOR_LOG}")
     print(f"Eval outputs root: {EVAL_LOG_ROOT}")
     print(f"Summary CSV: {summary_path}")
+    print(f"Detection periods CSV: {periods_path}")
     for row in summary_rows:
         if row.get("pc_name") in ("ALL", ""):
             continue
@@ -1879,6 +1994,7 @@ def start_resource_monitor_if_enabled(cams):
 def print_session_banner(cams):
     print("=== Auto ID Assignment (Video Mode) ===")
     print(f"Model in use: {MODEL_NAME_FOR_LOG}")
+    print(f"Confidence threshold: default={CONF_THRESHOLD:.2f}, min_inference={MIN_CONF_THRESHOLD:.2f}, overrides={len(PC_CONF_THRESHOLD_OVERRIDES)}")
     if EVAL_MODE:
         print(f"Eval mode: ON | sample={EVAL_SAMPLE_SEC:.1f}s | groundtruth={GROUNDTRUTH_DIR}")
         print(f"Eval output root: {EVAL_LOG_ROOT}")
@@ -1947,14 +2063,19 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 for box in results[0].boxes:
                     cls = int(box.cls[0])
                     conf = float(box.conf[0])
-                    if cls in PERSON_CLASS_IDS and conf > CONF_THRESHOLD:
-                        person_count += 1
+                    if cls in PERSON_CLASS_IDS:
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         current_box = (x1, y1, x2, y2)
-                        detected_person_boxes.append(current_box)
 
                         # determine which PC this person is in
                         current_pc = get_pc_for_box(current_box, cam_data["pc_rois"]) if ENABLE_PC_ROI else None
+                        conf_threshold = get_conf_threshold_for_pc(current_pc)
+                        if conf <= conf_threshold:
+                            continue
+
+                        person_count += 1
+                        detected_person_boxes.append(current_box)
+
                         matched_id = match_box_to_person(
                             current_box,
                             cam_data["tracked_persons"],
@@ -2532,6 +2653,13 @@ def main():
         release_camera_resources(cams)
         stop_resource_monitor_if_enabled(monitor_stop, monitor_thread)
         save_session_outputs(cams, run_start_day_tag, pc_state_all_csv)
+        
+        # Auto-run duration-based evaluation if EVAL_MODE enabled
+        if EVAL_MODE:
+            eval_log_root = os.path.normpath(str(CLI_ARGS.eval_log_dir)) if str(CLI_ARGS.eval_log_dir).strip() else os.path.join(VIDEO_LOG_BASE_DIR, "eval")
+            groundtruth_dir = os.path.normpath(str(CLI_ARGS.groundtruth_dir))
+            print("\n=== Auto-Running Duration-Based Evaluation ===")
+            run_eval_only_mode(eval_log_root, groundtruth_dir)
 
 
 if __name__ == "__main__":
