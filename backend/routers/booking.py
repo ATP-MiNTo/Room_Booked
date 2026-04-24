@@ -569,7 +569,6 @@ def get_bookings_range(
             base_query += " AND s.major = %s"
             params.append(major)
         
-        # ปรับแก้ตรงนี้ให้ส่งค่า filter ไปให้ _build_date_filter จัดการให้ถูกต้อง
         clause = _build_date_filter(params, month=month, year=year, start=start, end=end, table_prefix="r.")
         base_query += clause
 
@@ -583,11 +582,12 @@ def get_bookings_range(
             total = row[1]
             if month:
                 day_val = date_val.split('-')[2]
-                results.append({"day": day_val, "total": total, "date": date_val})
+                results.append({"day": int(day_val), "total": total, "date": date_val})
             else:
                 results.append({"date": date_val, "total": total})
         return results
     except Exception as e:
+        print(f"Error get_bookings_range: {e}")
         raise HTTPException(status_code=500, detail="ไม่สามารถดึงข้อมูลสถิติได้")
     finally:
         if cur: cur.close()

@@ -228,13 +228,21 @@ export default function Analytics() {
         const raw = await resTrend.json();
         
         if (timeFilter === 'year') {
-          // จัดกลุ่มยอดตามเดือน 1-12
+          // --- รายปี (Year) ---
           const monthly = Array(12).fill(0);
-          raw.forEach(r => { monthly[new Date(r.date).getMonth()] += r.total; });
-          setTrendData(THAI_MONTHS_SHORT.map((m, i) => ({ name: m, 'จองและนั่ง': monthly[i], 'จองแต่ไม่นั่ง': 0, 'ไม่จองแต่นั่ง': 0 })));
+          raw.forEach(r => { 
+             const mIndex = new Date(r.date).getMonth();
+             monthly[mIndex] += r.total; 
+          });
+          setTrendData(THAI_MONTHS_SHORT.map((m, i) => ({ 
+             name: m, 
+             'จองและนั่ง': monthly[i], 
+             'จองแต่ไม่นั่ง': 0, 
+             'ไม่จองแต่นั่ง': 0 
+          })));
           
         } else if (timeFilter === 'month') {
-          // สร้างวันที่ 1 ถึง 30/31 สำหรับแกน X ของรายเดือน
+          // --- รายเดือน (Month) ---
           const daysInMonth = new Date(selMonth.year, selMonth.month, 0).getDate();
           const daily = Array(daysInMonth).fill(0);
           
@@ -254,7 +262,7 @@ export default function Analytics() {
           setTrendData(monthData);
 
         } else {
-          // สำหรับรายวัน หรือ รายสัปดาห์
+          // --- รายสัปดาห์ / รายวัน ---
           setTrendData(raw.map(r => ({ 
              name: r.day ? `${r.day}` : formatTrendLabel(r.date), 
              'จองและนั่ง': r.total, 
