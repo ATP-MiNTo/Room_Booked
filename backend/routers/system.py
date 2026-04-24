@@ -15,7 +15,7 @@ router = APIRouter()
 ROUTERS_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.dirname(ROUTERS_DIR)
 ROOT_DIR = os.path.dirname(BACKEND_DIR)
-BASE_UPLOAD_DIR = os.path.join(ROOT_DIR, "data", "face_scanner")
+BASE_UPLOAD_DIR = os.getenv("FACE_DIR", "data/face_scanner")
 
 def ensure_gregorian(d_input):
     if isinstance(d_input, date):
@@ -377,10 +377,14 @@ def backup_database(start_date: str = Query(...), end_date: str = Query(...), ad
                     if os.path.isdir(folder_path):
                         if not is_all_time:
                             try:
-                                if not (start_date <= folder_name <= end_date):
+                                folder_date = datetime.strptime(folder_name, "%Y-%m-%d").date()
+                                start_d = datetime.strptime(start_date, "%Y-%m-%d").date()
+                                end_d = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+                                if not (start_d <= folder_date <= end_d):
                                     continue
-                            except:
-                                pass
+                            except ValueError:
+                                continue
                         
                         for file_name in os.listdir(folder_path):
                             file_path = os.path.join(folder_path, file_name)
@@ -418,6 +422,7 @@ async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str]
         with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
             json_data = zip_file.read("backup_data.json").decode('utf-8')
             backup_data = json.loads(json_data)
+            os.makedirs(BASE_UPLOAD_DIR, exist_ok=True)
             
             for file_info in zip_file.infolist():
                 if file_info.filename.startswith("images/") and not file_info.is_dir():

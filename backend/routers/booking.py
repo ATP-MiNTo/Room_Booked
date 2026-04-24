@@ -1,5 +1,4 @@
 import os
-import shutil
 import cloudinary
 import cloudinary.uploader
 from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form
@@ -11,9 +10,9 @@ from database import get_db
 
 # ตั้งค่า Cloudinary
 cloudinary.config(
-    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME", "dxnogh96j"),
-    api_key=os.getenv("CLOUDINARY_API_KEY", "367479691313863"),
-    api_secret=os.getenv("CLOUDINARY_API_SECRET", "TmEl9PP-xty69Y12jMKic6niE7g")
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET")
 )
 
 router = APIRouter()
@@ -21,10 +20,6 @@ router = APIRouter()
 ROUTERS_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.dirname(ROUTERS_DIR)
 ROOT_DIR = os.path.dirname(BACKEND_DIR)
-BASE_UPLOAD_DIR = os.path.join(ROOT_DIR, "data", "face_scanner")
-
-if not os.path.exists(BASE_UPLOAD_DIR):
-    os.makedirs(BASE_UPLOAD_DIR, exist_ok=True)
 
 class Reservation(BaseModel):
     seat_id: int
@@ -132,8 +127,10 @@ def get_booked_seats(
         cur.execute("""
             SELECT DISTINCT seat_no
             FROM reservations
-            WHERE start_time < %s AND end_time > %s
-        """, (end_dt, start_dt))
+            WHERE DATE(start_time) = %s
+            AND start_time < %s 
+            AND end_time > %s
+        """, (reserve_date, end_dt, start_dt))
         for row in cur.fetchall():
             seat_statuses[str(row[0])] = {"status": "booked", "reason": "มีผู้จองแล้ว"}
 
@@ -248,6 +245,42 @@ def reserve_with_image(
 
         start_naive = start_dt.replace(tzinfo=None)
         end_naive = end_dt.replace(tzinfo=None)
+        
+        days_map = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+        target_day = days_map[reserve_date.weekday()]
+
+        cur.execute("""
+        SELECT 1 FROM lab_schedules
+        WHERE
+        (
+            (start_date <= %s AND end_date >= %s AND day_of_week = %s)
+            OR
+            (start_date = %s AND end_date = %s)
+        )
+        AND (seat_no IS NULL OR seat_no = %s)
+        AND start_time < %s
+        AND end_time > %s
+        """, (
+            reserve_date,
+            reserve_date,
+            target_day,
+            reserve_date,
+            reserve_date,
+            seat_id,
+            end_naive,
+            start_naive
+        ))
+
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="ช่วงเวลานี้ถูกล็อคโดยตารางเรียน")
+
+        cur.execute("""
+        SELECT 1 FROM broken_seats 
+        WHERE seat_no = %s AND status = 'broken'
+        """, (seat_id,))
+
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="ที่นั่งนี้เครื่องเสีย")
 
         cur.execute("""
             SELECT 1 FROM reservations
