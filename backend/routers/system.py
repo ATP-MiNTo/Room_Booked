@@ -2,7 +2,6 @@ import json
 import zipfile
 import io
 import os
-import httpx
 from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Query, Depends, Header
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -372,21 +371,25 @@ def backup_database(start_date: str = Query(...), end_date: str = Query(...), ad
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             zip_file.writestr("backup_data.json", json_str.encode('utf-8'))
             
-            image_rows = fetch_table_safe("SELECT image_name, student_id, DATE(start_time) as d FROM reservations WHERE image_name IS NOT NULL AND image_name LIKE 'http%'")
+            if os.path.exists(BASE_UPLOAD_DIR):
+                for folder_name in os.listdir(BASE_UPLOAD_DIR):
+                    folder_path = os.path.join(BASE_UPLOAD_DIR, folder_name)
+                    if os.path.isdir(folder_path):
+                        if not is_all_time:
+                            try:
+                                folder_date = datetime.strptime(folder_name, "%Y-%m-%d").date()
+                                start_d = datetime.strptime(start_date, "%Y-%m-%d").date()
+                                end_d = datetime.strptime(end_date, "%Y-%m-%d").date()
 
-            for img in image_rows:
-                url = img.get("image_name")
-                student_id = img.get("student_id", "unknown")
-                date_str = str(img.get("d", "unknown"))
-                if not url:
-                    continue
-                try:
-                    r = httpx.get(url, timeout=10)
-                    if r.status_code == 200:
-                        filename = url.split("/")[-1]
-                        zip_file.writestr(f"images/{date_str}/{filename}", r.content)
-                except Exception as e:
-                    print(f"Failed to download image {url}: {e}")
+                                if not (start_d <= folder_date <= end_d):
+                                    continue
+                            except ValueError:
+                                continue
+                        
+                        for file_name in os.listdir(folder_path):
+                            file_path = os.path.join(folder_path, file_name)
+                            if os.path.isfile(file_path):
+                                zip_file.write(file_path, arcname=f"images/{folder_name}/{file_name}")
 
         if admin_id:
             try:
