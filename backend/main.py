@@ -27,6 +27,7 @@ ROOT_DIR = os.path.dirname(BACKEND_DIR)
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 print(f"Serving static files from: {DATA_DIR}")
 
+os.makedirs(DATA_DIR, exist_ok=True)  # เพิ่มบรรทัดนี้
 app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
 
 app.include_router(booking_router)
