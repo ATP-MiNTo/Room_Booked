@@ -2,6 +2,7 @@ import json
 import zipfile
 import io
 import os
+import requests
 from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Query, Depends, Header
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -371,25 +372,22 @@ def backup_database(start_date: str = Query(...), end_date: str = Query(...), ad
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             zip_file.writestr("backup_data.json", json_str.encode('utf-8'))
             
-            if os.path.exists(BASE_UPLOAD_DIR):
-                for folder_name in os.listdir(BASE_UPLOAD_DIR):
-                    folder_path = os.path.join(BASE_UPLOAD_DIR, folder_name)
-                    if os.path.isdir(folder_path):
-                        if not is_all_time:
-                            try:
-                                folder_date = datetime.strptime(folder_name, "%Y-%m-%d").date()
-                                start_d = datetime.strptime(start_date, "%Y-%m-%d").date()
-                                end_d = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-                                if not (start_d <= folder_date <= end_d):
-                                    continue
-                            except ValueError:
-                                continue
-                        
-                        for file_name in os.listdir(folder_path):
-                            file_path = os.path.join(folder_path, file_name)
-                            if os.path.isfile(file_path):
-                                zip_file.write(file_path, arcname=f"images/{folder_name}/{file_name}")
+            # Download images from Cloudinary URLs stored in DB
+            image_rows = [r for r in backup_data.get('reservations', []) if r.get('image_url')]
+            for row in image_rows:
+                url = row['image_url']
+                try:
+                    resp = requests.get(url, timeout=15)
+                    if resp.status_code == 200:
+                        # ดึง folder จาก start_time เช่น 2026-04-24
+                        reserve_date = ""
+                        if row.get('start_time'):
+                            reserve_date = str(row['start_time'])[:10]
+                        filename = url.split("/")[-1].split("?")[0]
+                        arcname = f"images/{reserve_date}/{filename}" if reserve_date else f"images/{filename}"
+                        zip_file.writestr(arcname, resp.content)
+                except Exception as e:
+                    print(f"Skip image {url}: {e}")
 
         if admin_id:
             try:
