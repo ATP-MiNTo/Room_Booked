@@ -1,329 +1,363 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import AdminLayout from '../../components/admin/AdminLayout';
 import Swal from 'sweetalert2';
 import { 
-    RiDownloadCloud2Line, 
-    RiUploadCloud2Line, 
-    RiHistoryLine, 
-    RiFileZipLine, 
-    RiAlertLine,
-    RiDatabase2Line
+  RiDatabase2Fill, 
+  RiHistoryFill, 
+  RiDownloadCloud2Fill, 
+  RiUploadCloud2Fill, 
+  RiArrowDownSFill,
+  RiInformationFill,
+  RiFileZipLine,
+  RiRefreshLine
 } from 'react-icons/ri';
-import AdminLayout from '../../components/admin/AdminLayout';
+
+import { THAI_MONTHS_SHORT } from '../../utils/dateUtils';
+import { pageStyles, tableStyles, btnStyles } from '../../utils/uiConstants';
 import { authFetch } from '../../utils/authFetch';
-import { pageStyles, btnStyles } from '../../utils/uiConstants';
 
 export default function BackupRestore() {
-    const [logs, setLogs] = useState([]);
-    const [backupType, setBackupType] = useState('all'); // 'all' หรือ 'custom'
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
-    const [selectedFile, setSelectedFile] = useState(null);
-    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const currentAdminId = sessionStorage.getItem('adminId');
+  const today = new Date().toISOString().split("T")[0];
+  const currentYear = new Date().getFullYear();
 
-    // ดึงข้อมูล Admin จาก LocalStorage
-    const adminData = JSON.parse(localStorage.getItem('admin') || '{}');
-    const adminId = adminData.staff_id || 'unknown';
+  const [openPanel, setOpenPanel] = useState(null); 
+  const [restoreFile, setRestoreFile] = useState(null);
+  const fileInputRef = useRef(null); 
+  
+  const [backupMode, setBackupMode] = useState('all');
+  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
+  const [endDate, setEndDate] = useState(today);
 
-    useEffect(() => {
-        const handleResize = () => setIsMobile(window.innerWidth <= 768);
-        window.addEventListener('resize', handleResize);
-        fetchLogs();
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
+  const [backupHistory, setBackupHistory] = useState([]); 
 
-    const fetchLogs = async () => {
-        try {
-            const res = await authFetch('/api/system/logs');
-            if (res.ok) {
-                const data = await res.json();
-                setLogs(data);
-            }
-        } catch (error) {
-            console.error('Error fetching logs:', error);
-        }
-    };
+  const formatLogDate = (dateStr) => {
+    if (!dateStr) return { date: '-', time: '-' };
+    try {
+      const [datePart, timePart] = dateStr.split(' ');
+      if (datePart && timePart) {
+        const [d, m, y] = datePart.split('/');
+        const thaiYear = parseInt(y) < 2400 ? parseInt(y) + 543 : parseInt(y);
+        
+        return {
+            date: `${parseInt(d)} ${THAI_MONTHS_SHORT[parseInt(m) - 1]} ${thaiYear}`,
+            time: `${timePart} น.`
+        };
+      }
+      return { date: dateStr, time: '-' };
+    } catch (e) {
+      return { date: dateStr, time: '-' };
+    }
+  };
 
-    // ฟังก์ชันสำหรับดาวน์โหลดไฟล์ Backup
-    const handleBackup = async () => {
-        if (backupType === 'custom' && (!startDate || !endDate)) {
-            Swal.fire('แจ้งเตือน', 'กรุณาเลือกช่วงวันที่ให้ครบถ้วน', 'warning');
-            return;
-        }
-        if (backupType === 'custom' && startDate > endDate) {
-            Swal.fire('แจ้งเตือน', 'วันที่เริ่มต้นต้องไม่มากกว่าวันที่สิ้นสุด', 'warning');
-            return;
-        }
+  const fetchLogs = async () => {
+    try {
+      const res = await authFetch('/api/system/logs');
+      if (res.ok) {
+        const data = await res.json();
+        setBackupHistory(data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
+  useEffect(() => {
+    fetchLogs();
+  }, []);
+
+  const handleBackup = async () => {
+    let queryStart = startDate;
+    let queryEnd = endDate;
+
+    if (backupMode === 'all') {
+        queryStart = 'all';
+        queryEnd = 'all';
+    } else if (!startDate || !endDate) {
+        return Swal.fire('แจ้งเตือน', 'กรุณาเลือกช่วงวันที่ให้ครบถ้วน', 'warning');
+    }
+
+    try {
+      Swal.fire({
+        title: 'กำลังบีบอัดข้อมูล...',
+        text: 'กำลังรวบรวมฐานข้อมูลและรูปภาพใบหน้าเป็นไฟล์ .zip โปรดรอสักครู่',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+      });
+
+      const adminParam = currentAdminId ? `&admin_id=${currentAdminId}` : '';
+      const res = await authFetch(`/api/system/backup?start_date=${queryStart}&end_date=${queryEnd}${adminParam}`);
+      
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        
+        const now = new Date();
+        const timestamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+        const fileNameSuffix = backupMode === 'all' ? 'all_time' : `${startDate}_to_${endDate}`;
+        a.download = `complab_backup_${fileNameSuffix}_${timestamp}.zip`;
+        
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        
+        Swal.fire('สำเร็จ!', 'ดาวน์โหลดไฟล์สำรองข้อมูล (.zip) เรียบร้อยแล้ว', 'success');
+        fetchLogs(); 
+      } else {
+        const errData = await res.json().catch(() => ({ detail: "ไม่ทราบสาเหตุแน่ชัด" }));
+        Swal.fire('ข้อผิดพลาด', `Backend Error: ${typeof errData.detail === 'string' ? errData.detail : 'ไม่ทราบสาเหตุ'}`, 'error');
+      }
+    } catch (error) {
+      console.error(error);
+      Swal.fire('ข้อผิดพลาด', 'ไม่สามารถติดต่อเซิร์ฟเวอร์ได้', 'error');
+    }
+  };
+
+  const handleMigrateSubmit = async (e) => {
+    e.preventDefault();
+    if (!restoreFile) {
+      return Swal.fire('แจ้งเตือน', 'กรุณาเลือกไฟล์ .zip ก่อนนำเข้า', 'warning');
+    }
+
+    const confirm = await Swal.fire({
+      title: 'คำเตือนการนำเข้าข้อมูล',
+      html: 'ระบบจะนำเข้าข้อมูลตารางและรูปภาพที่อยู่ในไฟล์ ZIP <b>เข้าระบบ (Migration)</b><br/>(หากมีข้อมูลที่ซ้ำกันอยู่แล้ว ระบบจะข้ามไป ไม่ลบข้อมูลปัจจุบันทิ้ง)',
+      icon: 'info',
+      showCancelButton: true,
+      confirmButtonColor: '#dc3545',
+      cancelButtonText: 'ยกเลิก',
+      confirmButtonText: 'ยืนยันการนำเข้า'
+    });
+
+    if (confirm.isConfirmed) {
+      try {
         Swal.fire({
-            title: 'กำลังเตรียมไฟล์สำรองข้อมูล...',
-            text: 'รวมรูปภาพและฐานข้อมูล อาจใช้เวลาสักครู่',
-            allowOutsideClick: false,
-            didOpen: () => Swal.showLoading()
+          title: 'กำลังนำเข้าและอัปโหลดรูปภาพ...', // ปรับ text ให้อัปเดต
+          text: 'อาจใช้เวลานานขึ้นอยู่กับจำนวนรูปภาพ ห้ามปิดหน้าต่างนี้เด็ดขาด',
+          allowOutsideClick: false,
+          didOpen: () => Swal.showLoading()
         });
 
-        try {
-            const start = backupType === 'all' ? 'all' : startDate;
-            const end = backupType === 'all' ? 'all' : endDate;
-            
-            const res = await authFetch(`/api/system/backup?start_date=${start}&end_date=${end}&admin_id=${adminId}`);
-            
-            if (!res.ok) throw new Error('เกิดข้อผิดพลาดในการสำรองข้อมูล');
+        const formData = new FormData();
+        formData.append('file', restoreFile);
+        formData.append('admin_id', currentAdminId || 'unknown');
 
-            // รับไฟล์ Zip กลับมาแล้วบังคับดาวน์โหลด
-            const blob = await res.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            // ดึงชื่อไฟล์จาก Header Content-Disposition ถ้ามี
-            const contentDisposition = res.headers.get('Content-Disposition');
-            let filename = `complab_backup_${new Date().getTime()}.zip`;
-            if (contentDisposition) {
-                const filenameMatch = contentDisposition.match(/filename=(.+)/);
-                if (filenameMatch && filenameMatch.length === 2) {
-                    filename = filenameMatch[1];
-                }
-            }
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            window.URL.revokeObjectURL(url);
-
-            Swal.fire('สำเร็จ', 'ดาวน์โหลดไฟล์สำรองข้อมูลเรียบร้อยแล้ว', 'success');
-            fetchLogs(); // โหลดประวัติใหม่
-        } catch (error) {
-            Swal.fire('ผิดพลาด', error.message, 'error');
-        }
-    };
-
-    // ฟังก์ชันสำหรับอัปโหลดไฟล์ Restore/Migrate
-    const handleRestore = async () => {
-        if (!selectedFile) {
-            Swal.fire('แจ้งเตือน', 'กรุณาเลือกไฟล์ .zip ที่ต้องการนำเข้า', 'warning');
-            return;
-        }
-
-        const confirm = await Swal.fire({
-            title: 'ยืนยันการนำเข้าข้อมูล?',
-            html: '<p style="color: #d32f2f;">ข้อมูลใหม่จะถูกนำไปผสาน (Merge) เข้ากับข้อมูลเดิม หากมีรหัสซ้ำ ระบบจะยึดข้อมูลเดิมเป็นหลัก</p>แน่ใจหรือไม่ที่จะนำเข้าไฟล์นี้?',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#1677ff',
-            cancelButtonColor: '#d33',
-            confirmButtonText: 'ยืนยันการนำเข้า',
-            cancelButtonText: 'ยกเลิก'
+        // ใช้การ fetch ตรงๆ เพื่อให้ Browser จัดการ Multipart Boundary ป้องกันไฟล์เสีย
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        const res = await fetch('/api/system/migrate', { 
+          method: 'POST', 
+          headers: {
+            'Authorization': `Bearer ${token}`
+            // ห้ามใส่ 'Content-Type': 'application/json' เด็ดขาดเวลาใช้ FormData
+          },
+          body: formData 
         });
 
-        if (confirm.isConfirmed) {
-            Swal.fire({
-                title: 'กำลังนำเข้าและอัปโหลดรูปภาพ...',
-                text: 'กระบวนการนี้อาจใช้เวลานาน ห้ามปิดหน้านี้เด็ดขาด',
-                allowOutsideClick: false,
-                didOpen: () => Swal.showLoading()
-            });
-
-            try {
-                const formData = new FormData();
-                formData.append('file', selectedFile);
-                formData.append('admin_id', adminId);
-
-                // เปลี่ยนเป็น fetch ปกติที่ไม่กำหนด Content-Type (ให้เบราว์เซอร์จัดการ Boundary เอง)
-                const token = localStorage.getItem('token');
-                const res = await fetch('/api/system/migrate', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                        // ไม่ต้องใส่ Content-Type: application/json เพราะเป็น multipart/form-data
-                    },
-                    body: formData
-                });
-
-                const data = await res.json();
-                
-                if (res.ok) {
-                    Swal.fire('สำเร็จ', 'นำเข้าข้อมูลและรูปภาพสำเร็จ', 'success');
-                    setSelectedFile(null);
-                    document.getElementById('file-upload').value = '';
-                    fetchLogs();
-                } else {
-                    throw new Error(data.detail || 'เกิดข้อผิดพลาดในการนำเข้าข้อมูล');
-                }
-            } catch (error) {
-                Swal.fire('ผิดพลาด', error.message, 'error');
-            }
+        if (res.ok) {
+          Swal.fire('สำเร็จ!', 'นำเข้าฐานข้อมูลและรูปภาพขึ้น Cloud เรียบร้อยแล้ว', 'success').then(() => {
+            setRestoreFile(null);
+            if (fileInputRef.current) fileInputRef.current.value = ""; 
+            fetchLogs(); 
+          });
+        } else {
+          const errData = await res.json().catch(() => ({ detail: "ไฟล์เสียหาย" }));
+          Swal.fire('ข้อผิดพลาด', `การนำเข้าล้มเหลว: ${typeof errData.detail === 'string' ? errData.detail : 'ไม่ทราบสาเหตุ'}`, 'error');
         }
-    };
+      } catch (error) {
+        Swal.fire('ข้อผิดพลาด', 'ไม่สามารถติดต่อเซิร์ฟเวอร์ได้', 'error');
+      }
+    }
+  };
 
-    return (
-        <AdminLayout>
-            <div style={{ padding: isMobile ? '15px' : '30px', maxWidth: '1200px', margin: '0 auto' }}>
-                <div style={pageStyles.header}>
-                    <h2 style={pageStyles.title}>
-                        <RiDatabase2Line color="#1677ff" /> สำรองและนำเข้าข้อมูล
-                    </h2>
+  const handleBoxClick = () => {
+    if (fileInputRef.current) {
+        fileInputRef.current.click();
+    }
+  };
+
+  return (
+    <AdminLayout>
+      {/* 🟢 ขยายความกว้างให้ตรงกับหน้าอื่น */}
+      <div style={{ padding: '10px', maxWidth: '1200px', margin: '0 auto', paddingBottom: '60px' }}>
+
+        {/* 🟢 Header มาตรฐาน */}
+        <div style={pageStyles.header}>
+          <h2 style={pageStyles.title}>
+            <RiDatabase2Fill color="#1677ff" /> Backup & Migration
+          </h2>
+          <button onClick={fetchLogs} style={btnStyles.refresh}>
+            <RiRefreshLine /> Refresh
+          </button>
+        </div>
+
+        {/* 🟢 แบ่งครึ่ง 2 ฝั่ง ซ้าย Backup ขวา Migrate */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '30px' }}>
+          
+          {/* สำรองข้อมูล */}
+          <div style={pageStyles.card}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '10px' }}>
+              <div style={{ backgroundColor: '#e6f4ff', padding: '15px', borderRadius: '50%', marginBottom: '15px' }}>
+                <RiDownloadCloud2Fill size={40} color="#1677ff" />
+              </div>
+              <h3 style={{ color: '#2c3e50', margin: '0 0 15px 0' }}>เลือกขอบเขตการสำรองข้อมูล</h3>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px', width: '100%', maxWidth: '400px', backgroundColor: '#f8f9fa', padding: '15px', borderRadius: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'bold', color: '#555' }}>
+                  <input 
+                    type="radio" 
+                    name="backupMode" 
+                    checked={backupMode === 'all'} 
+                    onChange={() => setBackupMode('all')} 
+                    style={{ transform: 'scale(1.2)' }}
+                  />
+                  สำรองทั้งหมด
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'bold', color: '#555' }}>
+                  <input 
+                    type="radio" 
+                    name="backupMode" 
+                    checked={backupMode === 'range'} 
+                    onChange={() => setBackupMode('range')} 
+                    style={{ transform: 'scale(1.2)' }}
+                  />
+                  กำหนดช่วงเวลา
+                </label>
+              </div>
+
+              {backupMode === 'range' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px', width: '100%', maxWidth: '400px' }}>
+                  <div style={{ textAlign: 'left' }}>
+                    <label style={f.label}>ตั้งแต่วันที่</label>
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{...f.input, marginTop: '5px'}} required />
+                  </div>
+                  <div style={{ textAlign: 'left' }}>
+                    <label style={f.label}>ถึงวันที่</label>
+                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={{...f.input, marginTop: '5px'}} required />
+                  </div>
                 </div>
+              )}
 
-                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '20px', marginBottom: '30px' }}>
-                    
-                    {/* การสำรองข้อมูล (Backup) */}
-                    <div style={{ ...pageStyles.card, borderTop: '4px solid #1677ff' }}>
-                        <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: 0, color: '#1e293b' }}>
-                            <RiDownloadCloud2Line size={24} color="#1677ff" /> ส่งออกไฟล์สำรอง (Backup)
-                        </h3>
-                        <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '20px' }}>
-                            ระบบจะบีบอัดข้อมูลฐานข้อมูลและรูปภาพทั้งหมดเป็นไฟล์ .zip เพื่อเก็บรักษาอย่างปลอดภัย
-                        </p>
-
-                        <div style={{ marginBottom: '15px' }}>
-                            <label style={{ display: 'block', marginBottom: '10px', fontWeight: 'bold', color: '#334155' }}>เลือกช่วงข้อมูล:</label>
-                            <div style={{ display: 'flex', gap: '20px', marginBottom: '15px' }}>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                                    <input 
-                                        type="radio" 
-                                        checked={backupType === 'all'} 
-                                        onChange={() => setBackupType('all')} 
-                                    /> ข้อมูลทั้งหมด
-                                </label>
-                                <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                                    <input 
-                                        type="radio" 
-                                        checked={backupType === 'custom'} 
-                                        onChange={() => setBackupType('custom')} 
-                                    /> กำหนดเอง
-                                </label>
-                            </div>
-
-                            {backupType === 'custom' && (
-                                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', backgroundColor: '#f8fafc', padding: '15px', borderRadius: '8px' }}>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ fontSize: '0.85rem', marginBottom: '5px', color: '#64748b' }}>ตั้งแต่วันที่:</div>
-                                        <input 
-                                            type="date" 
-                                            value={startDate} 
-                                            onChange={e => setStartDate(e.target.value)}
-                                            style={pageStyles.input} 
-                                        />
-                                    </div>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ fontSize: '0.85rem', marginBottom: '5px', color: '#64748b' }}>ถึงวันที่:</div>
-                                        <input 
-                                            type="date" 
-                                            value={endDate} 
-                                            onChange={e => setEndDate(e.target.value)}
-                                            style={pageStyles.input} 
-                                        />
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <button 
-                            onClick={handleBackup} 
-                            style={{ ...btnStyles.primary, width: '100%', padding: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', fontSize: '1rem' }}
-                        >
-                            <RiDownloadCloud2Line size={20} /> ดาวน์โหลดไฟล์ Backup (.zip)
-                        </button>
-                    </div>
-
-                    {/* การนำเข้าข้อมูล (Restore/Migrate) */}
-                    <div style={{ ...pageStyles.card, borderTop: '4px solid #10b981' }}>
-                        <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: 0, color: '#1e293b' }}>
-                            <RiUploadCloud2Line size={24} color="#10b981" /> นำเข้าข้อมูล (Migrate)
-                        </h3>
-                        <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '20px' }}>
-                            อัปโหลดไฟล์ .zip ที่ได้จากการ Backup ข้อมูลจะถูกนำไปผสานรวม (Merge) กับระบบปัจจุบัน
-                        </p>
-
-                        <div style={{ backgroundColor: '#fffbe6', border: '1px solid #ffe58f', padding: '12px', borderRadius: '8px', marginBottom: '20px', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                            <RiAlertLine color="#faad14" size={20} style={{ flexShrink: 0, marginTop: '2px' }} />
-                            <div style={{ fontSize: '0.85rem', color: '#d48806', lineHeight: '1.5' }}>
-                                <strong>ข้อควรระวัง:</strong> การนำเข้าจะยึดข้อมูลปัจจุบันเป็นหลัก หากรหัสซ้ำ ระบบจะไม่เขียนทับข้อมูลเดิม และรูปภาพจะถูกอัปโหลดขึ้น Cloud อัตโนมัติ
-                            </div>
-                        </div>
-
-                        <div style={{ marginBottom: '20px' }}>
-                            <label 
-                                htmlFor="file-upload" 
-                                style={{
-                                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                                    border: '2px dashed #cbd5e1', borderRadius: '8px', padding: '30px', cursor: 'pointer',
-                                    backgroundColor: selectedFile ? '#f0fdf4' : '#f8fafc', transition: 'all 0.3s'
-                                }}
-                            >
-                                <RiFileZipLine size={40} color={selectedFile ? '#10b981' : '#94a3b8'} style={{ marginBottom: '10px' }} />
-                                <span style={{ color: selectedFile ? '#166534' : '#475569', fontWeight: 'bold' }}>
-                                    {selectedFile ? selectedFile.name : 'คลิกเพื่อเลือกไฟล์ .zip'}
-                                </span>
-                                {selectedFile && <span style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '5px' }}>{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</span>}
-                                <input 
-                                    id="file-upload" 
-                                    type="file" 
-                                    accept=".zip" 
-                                    onChange={(e) => setSelectedFile(e.target.files[0])} 
-                                    style={{ display: 'none' }} 
-                                />
-                            </label>
-                        </div>
-
-                        <button 
-                            onClick={handleRestore}
-                            disabled={!selectedFile}
-                            style={{ 
-                                ...btnStyles.save, width: '100%', padding: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', fontSize: '1rem',
-                                backgroundColor: selectedFile ? '#10b981' : '#cbd5e1', cursor: selectedFile ? 'pointer' : 'not-allowed'
-                            }}
-                        >
-                            <RiUploadCloud2Line size={20} /> เริ่มการนำเข้าข้อมูล
-                        </button>
-                    </div>
-
-                </div>
-
-                {/* ประวัติการทำงาน (Logs) */}
-                <div style={pageStyles.card}>
-                    <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: 0, color: '#1e293b', borderBottom: '1px solid #e2e8f0', paddingBottom: '15px' }}>
-                        <RiHistoryLine size={22} color="#64748b" /> ประวัติการทำงานล่าสุด (System Logs)
-                    </h3>
-                    
-                    <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
-                            <thead>
-                                <tr style={{ backgroundColor: '#f8fafc', color: '#475569', textAlign: 'left' }}>
-                                    <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0' }}>วัน-เวลา</th>
-                                    <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0' }}>ประเภท</th>
-                                    <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0' }}>ผู้ดำเนินการ</th>
-                                    <th style={{ padding: '12px', borderBottom: '2px solid #e2e8f0' }}>ชื่อไฟล์</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {logs.length > 0 ? logs.map((log, index) => (
-                                    <tr key={index} style={{ borderBottom: '1px solid #e2e8f0', ':hover': { backgroundColor: '#f1f5f9' } }}>
-                                        <td style={{ padding: '12px', color: '#334155' }}>{log.date}</td>
-                                        <td style={{ padding: '12px' }}>
-                                            <span style={{ 
-                                                padding: '4px 10px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 'bold',
-                                                backgroundColor: log.type === 'backup' ? '#e0f2fe' : '#dcfce3',
-                                                color: log.type === 'backup' ? '#0369a1' : '#166534'
-                                            }}>
-                                                {log.type === 'backup' ? 'Export (Backup)' : 'Import (Migrate)'}
-                                            </span>
-                                        </td>
-                                        <td style={{ padding: '12px', color: '#334155' }}>{log.admin_name}</td>
-                                        <td style={{ padding: '12px', color: '#64748b', fontSize: '0.85rem', wordBreak: 'break-all' }}>{log.file_name}</td>
-                                    </tr>
-                                )) : (
-                                    <tr>
-                                        <td colSpan="4" style={{ padding: '20px', textAlign: 'center', color: '#94a3b8' }}>
-                                            ยังไม่มีประวัติการทำงาน
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
+              <button onClick={handleBackup} style={{ ...f.primaryBtn, width: '100%', maxWidth: '400px', padding: '12px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}>
+                <RiDatabase2Fill size={18} /> โหลดไฟล์ Backup (.zip)
+              </button>
             </div>
-        </AdminLayout>
-    );
+          </div>
+
+          {/* นำเข้าข้อมูล */}
+          <div style={pageStyles.card}>
+            <form onSubmit={handleMigrateSubmit} style={f.form}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '10px' }}>
+                <div style={{ backgroundColor: '#fff1f0', padding: '15px', borderRadius: '50%', marginBottom: '15px' }}>
+                  <RiUploadCloud2Fill size={40} color="#dc3545" />
+                </div>
+                <h3 style={{ color: '#2c3e50', margin: '0 0 15px 0' }}>นำเข้าข้อมูล (Data Migration)</h3>
+
+                <div style={{ backgroundColor: '#fff1f0', border: '1px solid #ffa39e', padding: '15px', borderRadius: '8px', display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '20px', width: '100%' }}>
+                  <RiInformationFill size={24} color="#cf1322" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div style={{ fontSize: '0.9rem', color: '#cf1322', lineHeight: '1.5', textAlign: 'left' }}>
+                    ระบบจะทำการแตกไฟล์และนำเข้า <b>ข้อมูลฐานข้อมูล และ รูปภาพขึ้น Cloud</b> รวมเข้ากับระบบปัจจุบัน (หากมีข้อมูลเดิมอยู่แล้ว ระบบจะข้ามไปโดยอัตโนมัติ)
+                  </div>
+                </div>
+
+                <div style={{...f.fg, width: '100%'}}>
+                  <div 
+                      onClick={handleBoxClick}
+                      style={{ 
+                          border: '2px dashed #ddd', 
+                          padding: '30px', 
+                          textAlign: 'center', 
+                          borderRadius: '10px', 
+                          cursor: 'pointer',
+                          backgroundColor: restoreFile ? '#e6f4ff' : '#fafafa',
+                          borderColor: restoreFile ? '#1677ff' : '#ddd',
+                          transition: 'all 0.2s'
+                      }}
+                  >
+                      <RiFileZipLine size={40} color={restoreFile ? '#1677ff' : '#aaa'} style={{ marginBottom: '10px' }} />
+                      <div style={{ color: restoreFile ? '#1677ff' : '#666', fontWeight: 'bold', fontSize: '1rem' }}>
+                          {restoreFile ? `เลือกไฟล์แล้ว: ${restoreFile.name}` : 'คลิกเพื่อเลือกไฟล์ .zip'}
+                      </div>
+                  </div>
+
+                  <input 
+                    type="file" 
+                    accept=".zip" 
+                    ref={fileInputRef}
+                    onChange={(e) => {
+                        if(e.target.files && e.target.files.length > 0) {
+                            setRestoreFile(e.target.files[0]);
+                        }
+                    }} 
+                    style={{ display: 'none' }} 
+                  />
+                </div>
+
+                <button type="submit" disabled={!restoreFile} style={{ ...f.dangerBtn, width: '100%', padding: '12px', marginTop: '20px', opacity: restoreFile ? 1 : 0.5, cursor: restoreFile ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                  <RiUploadCloud2Fill size={18} /> ยืนยันการนำเข้าข้อมูล
+                </button>
+              </div>
+            </form>
+          </div>
+
+        </div>
+
+        {/* ========== ตารางประวัติ ========== */}
+        <div style={pageStyles.card}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: '700', color: '#2c3e50', borderBottom: '2px solid #eee', paddingBottom: '9px', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <RiHistoryFill color="#64748b" /> ประวัติการสำรองและการนำเข้าข้อมูล (Logs)
+          </h3>
+          <div style={tableStyles.wrap}>
+            <table style={tableStyles.table}>
+              <thead>
+                <tr>
+                  <th style={{...tableStyles.th, width: '25%'}}>วันที่ / เวลา</th>
+                  <th style={tableStyles.th}>ประเภทรายการ</th>
+                  <th style={tableStyles.th}>ผู้ดำเนินการ</th>
+                  <th style={tableStyles.th}>ชื่อไฟล์</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backupHistory.length > 0 ? (
+                  backupHistory.map((item, idx) => {
+                    const formatted = formatLogDate(item.date);
+                    return (
+                      <tr key={idx}>
+                        <td style={{...tableStyles.td, fontWeight: 'bold', color: '#444'}}>{formatted.date}<br/><small style={{color:'#64748b', fontWeight:'normal'}}>{formatted.time}</small></td>
+                        <td style={tableStyles.td}>
+                          {item.type === 'backup' 
+                            ? <span style={{ ...pageStyles.badge, background: '#e6f4ff', color: '#1677ff' }}>สำรองข้อมูล</span> 
+                            : <span style={{ ...pageStyles.badge, background: '#fff1f0', color: '#dc3545' }}>นำเข้าข้อมูล</span>
+                          }
+                        </td>
+                        <td style={tableStyles.td}>{item.admin_name}</td>
+                        <td style={tableStyles.td}><small style={{ color: '#888', wordBreak: 'break-all' }}>{item.file_name}</small></td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan="4" style={{ ...tableStyles.td, textAlign: 'center', color: '#ccc', padding: '30px' }}>
+                      ยังไม่มีประวัติการทำรายการล่าสุด
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </AdminLayout>
+  );
 }
+
+const f = {
+  form:         { display: 'flex', flexDirection: 'column', gap: '14px', width: '100%' },
+  fg:           { display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 },
+  label:        { fontSize: '0.9rem', fontWeight: '700', color: '#4a5568' },
+  input:        { padding: '9px 11px', border: '1px solid #ddd', borderRadius: '8px', fontSize: '0.93rem', outline: 'none', width: '100%', boxSizing: 'border-box' },
+  primaryBtn:   { padding: '10px', background: '#1677ff', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '0.95rem', marginTop: '4px' },
+  dangerBtn:    { padding: '10px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '0.95rem', marginTop: '4px' },
+};
