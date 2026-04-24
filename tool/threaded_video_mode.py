@@ -56,6 +56,30 @@ def _normalize_pc_conf_threshold_map(raw_map):
     return normalized
 
 
+def _normalize_pc_iou_threshold_map(raw_map):
+    normalized = {}
+    if not isinstance(raw_map, dict):
+        return normalized
+
+    for key, value in raw_map.items():
+        pc_name = str(key).strip()
+        if not pc_name:
+            continue
+        try:
+            threshold = float(value)
+        except Exception:
+            continue
+        normalized[pc_name] = max(0.0, min(1.0, threshold))
+    return normalized
+
+
+def _normalize_threshold_mode(raw_mode, default_mode="dynamic"):
+    mode_text = str(raw_mode).strip().lower()
+    if mode_text in ("dynamic", "fixed"):
+        return mode_text
+    return str(default_mode).strip().lower()
+
+
 def load_runtime_config(config_path):
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -116,9 +140,16 @@ Windows_height = int(_require_config_value(CONFIG, "WINDOWS_HEIGHT"))
 # Detection settings
 CONF_THRESHOLD = float(_require_config_value(CONFIG, "CONF_THRESHOLD"))
 IOU_THRESHOLD = float(_require_config_value(CONFIG, "IOU_THRESHOLD"))
+CONF_THRESHOLD_MODE = _normalize_threshold_mode(CONFIG.get("CONF_THRESHOLD_MODE", "dynamic"), "dynamic")
+IOU_THRESHOLD_MODE = _normalize_threshold_mode(CONFIG.get("IOU_THRESHOLD_MODE", "dynamic"), "dynamic")
 SAVE_INTERVAL_SEC = float(_require_config_value(CONFIG, "SAVE_INTERVAL_SEC"))
 PC_CONF_THRESHOLD_OVERRIDES = _normalize_pc_conf_threshold_map(CONFIG.get("PC_CONF_THRESHOLD_OVERRIDES", {}))
-MIN_CONF_THRESHOLD = min([CONF_THRESHOLD] + list(PC_CONF_THRESHOLD_OVERRIDES.values())) if PC_CONF_THRESHOLD_OVERRIDES else CONF_THRESHOLD
+PC_IOU_THRESHOLD_OVERRIDES = _normalize_pc_iou_threshold_map(CONFIG.get("PC_IOU_THRESHOLD_OVERRIDES", {}))
+MIN_CONF_THRESHOLD = (
+    min([CONF_THRESHOLD] + list(PC_CONF_THRESHOLD_OVERRIDES.values()))
+    if (CONF_THRESHOLD_MODE == "dynamic" and PC_CONF_THRESHOLD_OVERRIDES)
+    else CONF_THRESHOLD
+)
 
 # Detection schedule settings
 DETECTION_START_HOUR_24 = int(_require_config_value(CONFIG, "DETECTION_START_HOUR_24"))
@@ -309,9 +340,59 @@ def run_model_inference(frame):
 
 
 def get_conf_threshold_for_pc(pc_name):
+    if CONF_THRESHOLD_MODE == "fixed":
+        return float(CONF_THRESHOLD)
     if not pc_name:
         return float(CONF_THRESHOLD)
     return float(PC_CONF_THRESHOLD_OVERRIDES.get(str(pc_name).strip(), CONF_THRESHOLD))
+
+
+def get_iou_threshold_for_pc(pc_name):
+    if IOU_THRESHOLD_MODE == "fixed":
+        return float(IOU_THRESHOLD)
+    if not pc_name:
+        return float(IOU_THRESHOLD)
+    return float(PC_IOU_THRESHOLD_OVERRIDES.get(str(pc_name).strip(), IOU_THRESHOLD))
+
+
+def box_iou(box_a, box_b):
+    ax1, ay1, ax2, ay2 = [float(v) for v in box_a[:4]]
+    bx1, by1, bx2, by2 = [float(v) for v in box_b[:4]]
+
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+    if inter_area <= 0.0:
+        return 0.0
+
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    denom = area_a + area_b - inter_area
+    if denom <= 0.0:
+        return 0.0
+    return inter_area / denom
+
+
+def apply_pc_nms_candidates(candidates, iou_threshold, conf_threshold):
+    sorted_candidates = sorted(candidates, key=lambda item: float(item[4]), reverse=True)
+    kept = []
+    for candidate in sorted_candidates:
+        conf = float(candidate[4])
+        if conf <= float(conf_threshold):
+            continue
+        suppressed = False
+        for kept_candidate in kept:
+            if box_iou(candidate, kept_candidate) > float(iou_threshold):
+                suppressed = True
+                break
+        if not suppressed:
+            kept.append(candidate)
+    return kept
 
 def to_safe_label(value):
     """Convert a display label into a filesystem-safe name."""
@@ -1109,6 +1190,8 @@ def collect_detection_rows(cam_idx, cam_data, sample_ts):
     pc_states = cam_data.get("pc_states", {})
     pc_people_counts = cam_data.get("last_pc_people_counts", {})
     pc_model_only_presence = cam_data.get("last_pc_model_only_presence", {})
+    pc_raw_conf_candidates = cam_data.get("last_pc_raw_conf_candidates", {})
+    pc_raw_box_candidates = cam_data.get("last_pc_raw_box_candidates", {})
     source_video = os.path.basename(str(cam_data.get("source_path", "")))
     raw_people_total = int(cam_data.get("person_count_raw", 0))
 
@@ -1117,6 +1200,8 @@ def collect_detection_rows(cam_idx, cam_data, sample_ts):
         pred_occupied = 1 if bool(state.get("person_present")) else 0
         pred_occupied_model_only = int(pc_model_only_presence.get(pc_name, 0))
         pred_people_count = int(pc_people_counts.get(pc_name, 0))
+        raw_conf_list = [float(v) for v in pc_raw_conf_candidates.get(pc_name, [])]
+        raw_box_list = [list(v) for v in pc_raw_box_candidates.get(pc_name, [])]
         current_person_id = state.get("current_person_id")
         current_person_text = str(current_person_id) if current_person_id else ""
 
@@ -1134,6 +1219,12 @@ def collect_detection_rows(cam_idx, cam_data, sample_ts):
                 "occupied_pred": pred_occupied,
                 "occupied_pred_model_only": pred_occupied_model_only,
                 "people_count_pred": pred_people_count,
+                "pc_raw_conf_count": len(raw_conf_list),
+                "pc_raw_conf_list_json": json.dumps(raw_conf_list, separators=(",", ":")),
+                "pc_conf_threshold_applied": round(get_conf_threshold_for_pc(pc_name), 4),
+                "pc_raw_box_count": len(raw_box_list),
+                "pc_raw_box_list_json": json.dumps(raw_box_list, separators=(",", ":")),
+                "pc_iou_threshold_applied": round(get_iou_threshold_for_pc(pc_name), 4),
                 "raw_people_count_pred": raw_people_total,
                 "current_person_ids_pred": current_person_text,
             }
@@ -1153,6 +1244,8 @@ def collect_eval_rows(cam_idx, cam_data, sample_ts):
     pc_states = cam_data.get("pc_states", {})
     pc_people_counts = cam_data.get("last_pc_people_counts", {})
     pc_model_only_presence = cam_data.get("last_pc_model_only_presence", {})
+    pc_raw_conf_candidates = cam_data.get("last_pc_raw_conf_candidates", {})
+    pc_raw_box_candidates = cam_data.get("last_pc_raw_box_candidates", {})
     source_video = os.path.basename(str(cam_data.get("source_path", "")))
 
     for pc_name in sorted(pc_states.keys(), key=pc_name_sort_key):
@@ -1160,6 +1253,8 @@ def collect_eval_rows(cam_idx, cam_data, sample_ts):
         pred_occupied = 1 if bool(state.get("person_present")) else 0
         pred_occupied_model_only = int(pc_model_only_presence.get(pc_name, 0))
         pred_people_count = int(pc_people_counts.get(pc_name, 0))
+        raw_conf_list = [float(v) for v in pc_raw_conf_candidates.get(pc_name, [])]
+        raw_box_list = [list(v) for v in pc_raw_box_candidates.get(pc_name, [])]
         current_person_id = state.get("current_person_id")
         current_person_text = str(current_person_id) if current_person_id else ""
 
@@ -1188,6 +1283,12 @@ def collect_eval_rows(cam_idx, cam_data, sample_ts):
                 "occupied_pred": pred_occupied,
                 "occupied_pred_model_only": pred_occupied_model_only,
                 "people_count_pred": pred_people_count,
+                "pc_raw_conf_count": len(raw_conf_list),
+                "pc_raw_conf_list_json": json.dumps(raw_conf_list, separators=(",", ":")),
+                "pc_conf_threshold_applied": round(get_conf_threshold_for_pc(pc_name), 4),
+                "pc_raw_box_count": len(raw_box_list),
+                "pc_raw_box_list_json": json.dumps(raw_box_list, separators=(",", ":")),
+                "pc_iou_threshold_applied": round(get_iou_threshold_for_pc(pc_name), 4),
                 "current_person_ids_pred": current_person_text,
                 "occupied_gt": occupied_gt,
                 "people_count_gt": people_count_gt,
@@ -1211,7 +1312,9 @@ def write_detection_outputs(cams):
         detail_path = os.path.join(cam_eval_dir, f"detection_detail_{cam_label}_{EVAL_TAG}.csv")
         detail_columns = [
             "run_tag", "model_name", "source_video", "time", "clock", "t_sec", "cam_idx", "cam_name",
-            "pc_name", "occupied_pred", "occupied_pred_model_only", "people_count_pred", "raw_people_count_pred", "current_person_ids_pred",
+            "pc_name", "occupied_pred", "occupied_pred_model_only", "people_count_pred", "pc_raw_conf_count",
+            "pc_raw_conf_list_json", "pc_conf_threshold_applied", "pc_raw_box_count", "pc_raw_box_list_json",
+            "pc_iou_threshold_applied", "raw_people_count_pred", "current_person_ids_pred",
         ]
         pd.DataFrame(detail_rows, columns=detail_columns).to_csv(detail_path, index=False)
 
@@ -1548,6 +1651,7 @@ def run_eval_only_mode(eval_log_root, groundtruth_dir):
     print("\n=== Eval-Only Mode (Duration-Based Metrics) ===")
     print(f"Eval log root: {eval_log_root}")
     print(f"Groundtruth dir: {groundtruth_dir}")
+    print(f"Config path: {CONFIG_FILE_PATH}")
 
     try:
         import importlib.util
@@ -1561,7 +1665,7 @@ def run_eval_only_mode(eval_log_root, groundtruth_dir):
         spec.loader.exec_module(evaluator_module)
         run_eval_only_duration = evaluator_module.run_eval_only_duration
 
-        success = run_eval_only_duration(eval_log_root, groundtruth_dir)
+        success = run_eval_only_duration(eval_log_root, groundtruth_dir, CONFIG_FILE_PATH)
         if success:
             print("Eval-only duration summary completed.")
         return
@@ -1593,7 +1697,9 @@ def write_eval_outputs(cams):
         detail_path = os.path.join(cam_eval_dir, f"eval_detail_{cam_label}_{EVAL_TAG}.csv")
         detail_columns = [
             "eval_tag", "model_name", "source_video", "time", "clock", "t_sec", "cam_idx", "cam_name",
-            "pc_name", "occupied_pred", "occupied_pred_model_only", "people_count_pred", "current_person_ids_pred",
+            "pc_name", "occupied_pred", "occupied_pred_model_only", "people_count_pred", "pc_raw_conf_count",
+            "pc_raw_conf_list_json", "pc_conf_threshold_applied", "pc_raw_box_count", "pc_raw_box_list_json",
+            "pc_iou_threshold_applied", "current_person_ids_pred",
             "occupied_gt", "people_count_gt", "match_occupied", "abs_people_count_error",
         ]
         pd.DataFrame(detail_rows, columns=detail_columns).to_csv(detail_path, index=False)
@@ -1955,6 +2061,8 @@ def build_camera_states():
             "pc_unattended_logs": [],
             "last_pc_people_counts": {},
             "last_pc_model_only_presence": {},
+            "last_pc_raw_conf_candidates": {},
+            "last_pc_raw_box_candidates": {},
             "eval_groundtruth": eval_groundtruth,
             "eval_detail_rows": [],
             "detection_detail_rows": [],
@@ -1994,7 +2102,16 @@ def start_resource_monitor_if_enabled(cams):
 def print_session_banner(cams):
     print("=== Auto ID Assignment (Video Mode) ===")
     print(f"Model in use: {MODEL_NAME_FOR_LOG}")
-    print(f"Confidence threshold: default={CONF_THRESHOLD:.2f}, min_inference={MIN_CONF_THRESHOLD:.2f}, overrides={len(PC_CONF_THRESHOLD_OVERRIDES)}")
+    print(
+        "Confidence threshold: "
+        f"default={CONF_THRESHOLD:.2f}, mode={CONF_THRESHOLD_MODE}, "
+        f"min_inference={MIN_CONF_THRESHOLD:.2f}, overrides={len(PC_CONF_THRESHOLD_OVERRIDES)}"
+    )
+    print(
+        "IOU threshold: "
+        f"default={IOU_THRESHOLD:.2f}, mode={IOU_THRESHOLD_MODE}, "
+        f"overrides={len(PC_IOU_THRESHOLD_OVERRIDES)}"
+    )
     if EVAL_MODE:
         print(f"Eval mode: ON | sample={EVAL_SAMPLE_SEC:.1f}s | groundtruth={GROUNDTRUTH_DIR}")
         print(f"Eval output root: {EVAL_LOG_ROOT}")
@@ -2057,6 +2174,8 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 
                 pc_to_person = {}
                 pc_people_counts = {}
+                pc_raw_conf_candidates = {pc_name: [] for pc_name in cam_data.get("pc_states", {}).keys()}
+                pc_raw_box_candidates = {pc_name: [] for pc_name in cam_data.get("pc_states", {}).keys()}
                 matched_track_ids = set()
                 detected_person_boxes = []
 
@@ -2069,6 +2188,9 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 
                         # determine which PC this person is in
                         current_pc = get_pc_for_box(current_box, cam_data["pc_rois"]) if ENABLE_PC_ROI else None
+                        if current_pc and current_pc in pc_raw_conf_candidates:
+                            pc_raw_conf_candidates[current_pc].append(float(conf))
+                            pc_raw_box_candidates[current_pc].append((x1, y1, x2, y2, float(conf)))
                         conf_threshold = get_conf_threshold_for_pc(current_pc)
                         if conf <= conf_threshold:
                             continue
@@ -2266,9 +2388,27 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 
                 pc_to_person_map = {pc_name: data[1] for pc_name, data in pc_to_person.items()}
                 pc_model_only_presence = {pc_name: 0 for pc_name in cam_data.get("pc_states", {}).keys()}
-                for pc_name in pc_to_person.keys():
-                    pc_model_only_presence[pc_name] = 1
+                pc_people_counts = {pc_name: 0 for pc_name in cam_data.get("pc_states", {}).keys()}
+                for pc_name, candidates in pc_raw_box_candidates.items():
+                    conf_threshold = get_conf_threshold_for_pc(pc_name)
+                    iou_threshold = get_iou_threshold_for_pc(pc_name)
+                    kept_candidates = apply_pc_nms_candidates(candidates, iou_threshold, conf_threshold)
+                    kept_count = len(kept_candidates)
+                    pc_people_counts[pc_name] = kept_count
+                    pc_model_only_presence[pc_name] = 1 if kept_count > 0 else 0
+
                 cam_data["last_pc_model_only_presence"] = pc_model_only_presence
+                cam_data["last_pc_raw_conf_candidates"] = {
+                    pc_name: sorted([round(float(v), 4) for v in conf_list], reverse=True)
+                    for pc_name, conf_list in pc_raw_conf_candidates.items()
+                }
+                cam_data["last_pc_raw_box_candidates"] = {
+                    pc_name: [
+                        [int(b[0]), int(b[1]), int(b[2]), int(b[3]), round(float(b[4]), 4)]
+                        for b in sorted(candidates, key=lambda item: float(item[4]), reverse=True)
+                    ]
+                    for pc_name, candidates in pc_raw_box_candidates.items()
+                }
 
                 # Report track-hold losses so debugging snapshots are produced.
                 hold_assignments_used = []

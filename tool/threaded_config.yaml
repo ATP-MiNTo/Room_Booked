@@ -24,6 +24,8 @@ WINDOWS_HEIGHT: 540
 # Detection thresholds and ROI snapshot frequency.
 CONF_THRESHOLD: 0.4
 IOU_THRESHOLD: 0.4
+CONF_THRESHOLD_MODE: dynamic
+IOU_THRESHOLD_MODE: dynamic
 SAVE_INTERVAL_SEC: 4
 PC_CONF_THRESHOLD_OVERRIDES:
   PC1: 0.25
@@ -56,6 +58,37 @@ PC_CONF_THRESHOLD_OVERRIDES:
   PC28: 0.25
   PC29: 0.4
   PC30: 0.45
+PC_IOU_THRESHOLD_OVERRIDES:
+  PC1: 0.4
+  PC2: 0.4
+  PC3: 0.4
+  PC4: 0.4
+  PC5: 0.4
+  PC6: 0.4
+  PC7: 0.4
+  PC8: 0.4
+  PC9: 0.4
+  PC10: 0.4
+  PC11: 0.4
+  PC12: 0.4
+  PC13: 0.4
+  PC14: 0.4
+  PC15: 0.4
+  PC16: 0.4
+  PC17: 0.4
+  PC18: 0.4
+  PC19: 0.4
+  PC20: 0.4
+  PC21: 0.4
+  PC22: 0.4
+  PC23: 0.4
+  PC24: 0.4
+  PC25: 0.4
+  PC26: 0.4
+  PC27: 0.4
+  PC28: 0.4
+  PC29: 0.4
+  PC30: 0.4
 
 # Live-mode detection schedule (24-hour local time).
 DETECTION_START_HOUR_24: 8

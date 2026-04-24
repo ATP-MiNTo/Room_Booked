@@ -8,6 +8,7 @@ No video processing or heavy dependencies required.
 import os
 import sys
 import argparse
+import json
 import pandas as pd
 from collections import defaultdict
 
@@ -19,6 +20,233 @@ def pc_name_sort_key(pc_name):
     digits = "".join(ch for ch in text if ch.isdigit())
     number = int(digits) if digits else 10**8
     return (number, text)
+
+
+def _normalize_pc_conf_threshold_map(raw_map):
+    normalized = {}
+    if not isinstance(raw_map, dict):
+        return normalized
+
+    for key, value in raw_map.items():
+        pc_name = str(key).strip()
+        if not pc_name:
+            continue
+        try:
+            threshold = float(value)
+        except Exception:
+            continue
+        normalized[pc_name] = max(0.0, min(1.0, threshold))
+    return normalized
+
+
+def _normalize_pc_iou_threshold_map(raw_map):
+    normalized = {}
+    if not isinstance(raw_map, dict):
+        return normalized
+
+    for key, value in raw_map.items():
+        pc_name = str(key).strip()
+        if not pc_name:
+            continue
+        try:
+            threshold = float(value)
+        except Exception:
+            continue
+        normalized[pc_name] = max(0.0, min(1.0, threshold))
+    return normalized
+
+
+def _normalize_threshold_mode(raw_mode, default_mode="dynamic"):
+    mode_text = str(raw_mode).strip().lower()
+    if mode_text in ("dynamic", "fixed"):
+        return mode_text
+    return str(default_mode).strip().lower()
+
+
+def load_threshold_config(config_path):
+    default_conf_threshold = 0.4
+    conf_overrides = {}
+    conf_mode = "dynamic"
+    default_iou_threshold = 0.4
+    iou_overrides = {}
+    iou_mode = "dynamic"
+
+    if not config_path or not os.path.exists(config_path):
+        return default_conf_threshold, conf_overrides, conf_mode, default_iou_threshold, iou_overrides, iou_mode
+
+    try:
+        import yaml
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+
+        if isinstance(loaded, dict):
+            default_conf_threshold = float(loaded.get("CONF_THRESHOLD", default_conf_threshold))
+            conf_overrides = _normalize_pc_conf_threshold_map(loaded.get("PC_CONF_THRESHOLD_OVERRIDES", {}))
+            conf_mode = _normalize_threshold_mode(loaded.get("CONF_THRESHOLD_MODE", "dynamic"), "dynamic")
+            default_iou_threshold = float(loaded.get("IOU_THRESHOLD", default_iou_threshold))
+            iou_overrides = _normalize_pc_iou_threshold_map(loaded.get("PC_IOU_THRESHOLD_OVERRIDES", {}))
+            iou_mode = _normalize_threshold_mode(loaded.get("IOU_THRESHOLD_MODE", "dynamic"), "dynamic")
+    except Exception as e:
+        print(f"Warning: failed to load thresholds from {config_path}: {e}")
+
+    return (
+        max(0.0, min(1.0, float(default_conf_threshold))),
+        conf_overrides,
+        conf_mode,
+        max(0.0, min(1.0, float(default_iou_threshold))),
+        iou_overrides,
+        iou_mode,
+    )
+
+
+def parse_raw_conf_list(raw_value):
+    if raw_value is None:
+        return []
+
+    if isinstance(raw_value, list):
+        values = raw_value
+    else:
+        text = str(raw_value).strip()
+        if not text or text.lower() in ("nan", "none"):
+            return []
+        try:
+            values = json.loads(text)
+        except Exception:
+            return []
+
+    if not isinstance(values, list):
+        return []
+
+    parsed = []
+    for value in values:
+        try:
+            parsed.append(float(value))
+        except Exception:
+            continue
+    return parsed
+
+
+def parse_raw_box_list(raw_value):
+    if raw_value is None:
+        return []
+
+    if isinstance(raw_value, list):
+        values = raw_value
+    else:
+        text = str(raw_value).strip()
+        if not text or text.lower() in ("nan", "none"):
+            return []
+        try:
+            values = json.loads(text)
+        except Exception:
+            return []
+
+    if not isinstance(values, list):
+        return []
+
+    parsed = []
+    for item in values:
+        if not isinstance(item, (list, tuple)) or len(item) < 5:
+            continue
+        try:
+            x1 = float(item[0])
+            y1 = float(item[1])
+            x2 = float(item[2])
+            y2 = float(item[3])
+            conf = float(item[4])
+            parsed.append((x1, y1, x2, y2, conf))
+        except Exception:
+            continue
+    return parsed
+
+
+def box_iou(box_a, box_b):
+    ax1, ay1, ax2, ay2 = [float(v) for v in box_a[:4]]
+    bx1, by1, bx2, by2 = [float(v) for v in box_b[:4]]
+
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+    if inter_area <= 0.0:
+        return 0.0
+
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    denom = area_a + area_b - inter_area
+    if denom <= 0.0:
+        return 0.0
+    return inter_area / denom
+
+
+def apply_pc_nms_candidates(candidates, iou_threshold, conf_threshold):
+    sorted_candidates = sorted(candidates, key=lambda item: float(item[4]), reverse=True)
+    kept = []
+    for candidate in sorted_candidates:
+        conf = float(candidate[4])
+        if conf <= float(conf_threshold):
+            continue
+        suppressed = False
+        for kept_candidate in kept:
+            if box_iou(candidate, kept_candidate) > float(iou_threshold):
+                suppressed = True
+                break
+        if not suppressed:
+            kept.append(candidate)
+    return kept
+
+
+def apply_threshold_recompute(
+    detail_df,
+    default_conf_threshold,
+    conf_threshold_overrides,
+    conf_mode,
+    default_iou_threshold,
+    iou_threshold_overrides,
+    iou_mode,
+):
+    has_raw_boxes = "pc_raw_box_list_json" in detail_df.columns
+    has_raw_conf = "pc_raw_conf_list_json" in detail_df.columns
+    if not has_raw_boxes and not has_raw_conf:
+        return detail_df, "none"
+
+    updated_df = detail_df.copy()
+    for idx, row in updated_df.iterrows():
+        pc_name = str(row.get("pc_name", "")).strip()
+        conf_threshold = float(default_conf_threshold)
+        iou_threshold = float(default_iou_threshold)
+        if conf_mode == "dynamic":
+            conf_threshold = float(conf_threshold_overrides.get(pc_name, default_conf_threshold))
+        if iou_mode == "dynamic":
+            iou_threshold = float(iou_threshold_overrides.get(pc_name, default_iou_threshold))
+
+        if has_raw_boxes:
+            box_list = parse_raw_box_list(row.get("pc_raw_box_list_json", "[]"))
+            kept_boxes = apply_pc_nms_candidates(box_list, iou_threshold, conf_threshold)
+            pred_count = len(kept_boxes)
+        else:
+            conf_list = parse_raw_conf_list(row.get("pc_raw_conf_list_json", "[]"))
+            pred_count = sum(1 for conf in conf_list if float(conf) > conf_threshold)
+
+        pred_occupied_model_only = 1 if pred_count > 0 else 0
+
+        updated_df.at[idx, "people_count_pred"] = int(pred_count)
+        updated_df.at[idx, "occupied_pred_model_only"] = int(pred_occupied_model_only)
+        updated_df.at[idx, "pc_conf_threshold_applied"] = round(conf_threshold, 4)
+        updated_df.at[idx, "pc_iou_threshold_applied"] = round(iou_threshold, 4)
+
+        if "people_count_gt" in updated_df.columns and pd.notna(row.get("people_count_gt")):
+            try:
+                updated_df.at[idx, "abs_people_count_error"] = abs(int(pred_count) - int(row.get("people_count_gt", 0)))
+            except Exception:
+                pass
+
+    return updated_df, "box" if has_raw_boxes else "conf"
 
 
 def format_compact_clock(seconds_value):
@@ -264,10 +492,28 @@ def discover_detail_csv(cam_eval_dir):
     return None, None
 
 
-def run_eval_only_duration(eval_log_root, groundtruth_dir):
+def run_eval_only_duration(eval_log_root, groundtruth_dir, config_path=""):
     print("\n=== Duration-Based Evaluation (Seat-Time Efficiency) ===")
     print(f"Eval log root: {eval_log_root}")
     print(f"Groundtruth dir: {groundtruth_dir}")
+    print(f"Config path: {config_path if config_path else '(none)'}")
+
+    (
+        default_conf_threshold,
+        conf_threshold_overrides,
+        conf_mode,
+        default_iou_threshold,
+        iou_threshold_overrides,
+        iou_mode,
+    ) = load_threshold_config(config_path)
+    print(
+        f"Thresholds for re-filter: conf_default={default_conf_threshold:.2f}, "
+        f"conf_mode={conf_mode}, "
+        f"conf_overrides={len(conf_threshold_overrides)}, "
+        f"iou_default={default_iou_threshold:.2f}, "
+        f"iou_mode={iou_mode}, "
+        f"iou_overrides={len(iou_threshold_overrides)}"
+    )
 
     if not os.path.exists(eval_log_root):
         print(f"Error: eval log root does not exist: {eval_log_root}")
@@ -296,6 +542,22 @@ def run_eval_only_duration(eval_log_root, groundtruth_dir):
         except Exception as e:
             print(f"Failed to read {detail_csv}: {e}")
             continue
+
+        detail_df, recompute_mode = apply_threshold_recompute(
+            detail_df,
+            default_conf_threshold,
+            conf_threshold_overrides,
+            conf_mode,
+            default_iou_threshold,
+            iou_threshold_overrides,
+            iou_mode,
+        )
+        if recompute_mode == "box":
+            print("Applied per-PC conf+IOU re-filter using raw box detail.")
+        elif recompute_mode == "conf":
+            print("Applied per-PC conf-only re-filter using raw confidence detail.")
+        else:
+            print("Raw confidence/box detail missing; using stored predictions as-is.")
 
         if detail_df.empty:
             print(f"Warning: {detail_csv} is empty, skipping.")
@@ -442,11 +704,17 @@ if __name__ == "__main__":
         default=os.path.join("tool", "groundtruth"),
         help="Groundtruth CSV directory",
     )
+    parser.add_argument(
+        "--config-path",
+        default=os.path.join("tool", "threaded_config.yaml"),
+        help="Runtime config YAML for per-PC thresholds",
+    )
     args = parser.parse_args()
 
     eval_log_root = args.eval_log_dir.strip() if args.eval_log_dir else "logs_video_mode/eval"
     eval_log_root = os.path.normpath(eval_log_root)
     groundtruth_dir = os.path.normpath(args.groundtruth_dir)
+    config_path = os.path.normpath(args.config_path) if args.config_path else ""
 
-    success = run_eval_only_duration(eval_log_root, groundtruth_dir)
+    success = run_eval_only_duration(eval_log_root, groundtruth_dir, config_path)
     sys.exit(0 if success else 1)
