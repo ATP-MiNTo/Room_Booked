@@ -134,8 +134,8 @@ export default function BackupRestore() {
     if (confirm.isConfirmed) {
       try {
         Swal.fire({
-          title: 'กำลังนำเข้าและอัปโหลดรูปภาพ...', // ปรับ text ให้อัปเดต
-          text: 'อาจใช้เวลานานขึ้นอยู่กับจำนวนรูปภาพ ห้ามปิดหน้าต่างนี้เด็ดขาด',
+          title: 'กำลังแตกไฟล์นำเข้า...',
+          text: 'กำลังอัปโหลดรูปภาพขึ้น Cloud อาจใช้เวลาสักครู่ ห้ามปิดหน้าต่างนี้เด็ดขาด',
           allowOutsideClick: false,
           didOpen: () => Swal.showLoading()
         });
@@ -144,14 +144,9 @@ export default function BackupRestore() {
         formData.append('file', restoreFile);
         formData.append('admin_id', currentAdminId || 'unknown');
 
-        // ใช้การ fetch ตรงๆ เพื่อให้ Browser จัดการ Multipart Boundary ป้องกันไฟล์เสีย
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        const res = await fetch('/api/system/migrate', { 
+        // กลับมาใช้ authFetch ตามเดิมของคุณ เพื่อแก้ปัญหา 401 Unauthorized
+        const res = await authFetch('/api/system/migrate', { 
           method: 'POST', 
-          headers: {
-            'Authorization': `Bearer ${token}`
-            // ห้ามใส่ 'Content-Type': 'application/json' เด็ดขาดเวลาใช้ FormData
-          },
           body: formData 
         });
 
@@ -179,10 +174,10 @@ export default function BackupRestore() {
 
   return (
     <AdminLayout>
-      {/* 🟢 ขยายความกว้างให้ตรงกับหน้าอื่น */}
+      {/* ขยายความกว้างให้ตรงกับหน้าอื่น */}
       <div style={{ padding: '10px', maxWidth: '1200px', margin: '0 auto', paddingBottom: '60px' }}>
 
-        {/* 🟢 Header มาตรฐาน */}
+        {/* Header มาตรฐาน */}
         <div style={pageStyles.header}>
           <h2 style={pageStyles.title}>
             <RiDatabase2Fill color="#1677ff" /> Backup & Migration
@@ -192,7 +187,7 @@ export default function BackupRestore() {
           </button>
         </div>
 
-        {/* 🟢 แบ่งครึ่ง 2 ฝั่ง ซ้าย Backup ขวา Migrate */}
+        {/* แบ่งครึ่ง 2 ฝั่ง ซ้าย Backup ขวา Migrate */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '30px' }}>
           
           {/* สำรองข้อมูล */}
@@ -257,7 +252,7 @@ export default function BackupRestore() {
                 <div style={{ backgroundColor: '#fff1f0', border: '1px solid #ffa39e', padding: '15px', borderRadius: '8px', display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '20px', width: '100%' }}>
                   <RiInformationFill size={24} color="#cf1322" style={{ flexShrink: 0, marginTop: '2px' }} />
                   <div style={{ fontSize: '0.9rem', color: '#cf1322', lineHeight: '1.5', textAlign: 'left' }}>
-                    ระบบจะทำการแตกไฟล์และนำเข้า <b>ข้อมูลฐานข้อมูล และ รูปภาพขึ้น Cloud</b> รวมเข้ากับระบบปัจจุบัน (หากมีข้อมูลเดิมอยู่แล้ว ระบบจะข้ามไปโดยอัตโนมัติ)
+                    ระบบจะทำการแตกไฟล์และนำเข้า <b>ข้อมูลฐานข้อมูล และรูปภาพขึ้น Cloud</b> รวมเข้ากับระบบปัจจุบัน (หากมีข้อมูลเดิมอยู่แล้ว ระบบจะข้ามไปโดยอัตโนมัติ)
                   </div>
                 </div>
 
