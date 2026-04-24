@@ -373,9 +373,9 @@ def backup_database(start_date: str = Query(...), end_date: str = Query(...), ad
             zip_file.writestr("backup_data.json", json_str.encode('utf-8'))
             
             # Download images from Cloudinary URLs stored in DB
-            image_rows = [r for r in backup_data.get('reservations', []) if r.get('image_url')]
+            image_rows = [r for r in backup_data.get('reservations', []) if r.get('image_name')]
             for row in image_rows:
-                url = row['image_url']
+                url = row['image_name']
                 try:
                     resp = requests.get(url, timeout=15)
                     if resp.status_code == 200:
