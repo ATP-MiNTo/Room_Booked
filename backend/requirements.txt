@@ -10,3 +10,4 @@ websockets==16.0
 starlette==0.52.1
 PyJWT==2.8.0
 cloudinary==1.36.0
+httpx==0.34.0
