@@ -5,7 +5,7 @@ import os
 import requests
 import cloudinary
 import cloudinary.uploader
-from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Query, Depends, Header
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Query, Depends, Header, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from datetime import date, time, datetime
@@ -14,7 +14,7 @@ from database import get_db
 from security import get_password_hash, verify_token
 
 # ==========================================
-# ตั้งค่า Cloudinary (เพิ่มเข้ามาใหม่)
+# ตั้งค่า Cloudinary
 # ==========================================
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
@@ -46,6 +46,42 @@ def ensure_gregorian(d_input):
         except:
             return d_input
     return d_input
+
+# ==========================================
+# WebSocket Manager สำหรับ Live Monitor (เพิ่มใหม่)
+# ==========================================
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except Exception as e:
+                print(f"Error broadcasting to a client: {e}")
+
+manager = ConnectionManager()
+
+@router.websocket("/ws/pc-updates")
+async def websocket_pc_updates(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # รับข้อมูลที่ส่งเข้ามา (เช่น ข้อมูล PC จากกล้อง)
+            data = await websocket.receive_text()
+            # ทำการส่งต่อ (Broadcast) ให้กับ Client อื่นๆ ที่เปิดหน้า Monitor อยู่
+            await manager.broadcast(data)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 # ==========================================
 # จัดการปีการศึกษาและภาคเรียน

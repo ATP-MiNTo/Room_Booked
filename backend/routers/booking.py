@@ -3,7 +3,6 @@ import cloudinary
 import cloudinary.uploader
 from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form
 from pydantic import BaseModel
-from pydantic import BaseModel as _BaseModel
 from datetime import datetime, date, time, timezone, timedelta
 
 from database import get_db
@@ -297,6 +296,7 @@ def reserve_with_image(
         public_id = f"face_scanner/{reserve_date.strftime('%Y-%m-%d')}/{date_str}_Seat{seat_id:02d}_{start_str}_{end_str}_{student_id}"
         image_data = image.file.read()
 
+        # อัปโหลดรูปไป Cloudinary
         upload_result = cloudinary.uploader.upload(
             image_data,
             public_id=public_id,
