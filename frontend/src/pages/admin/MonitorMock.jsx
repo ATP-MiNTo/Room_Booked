@@ -147,7 +147,7 @@ export default function MonitorMock() {
         studentName: activeDbBooking ? `นักศึกษา (${activeDbBooking.student_id})` : (isMockBooked ? "ข้อมูลจำลอง (MOCK)" : (activeSchedule ? `ถูกล็อก: ${activeSchedule.purpose}` : null)), 
         studentId: activeDbBooking?.student_id || (isMockBooked ? "MOCK-123456" : null),
         time: activeDbBooking ? `${activeDbBooking.start_time?.substring(0,5)} - ${activeDbBooking.end_time?.substring(0,5)}` : (isMockBooked ? "09:00 - 12:00 (จำลอง)" : (activeSchedule ? `${activeSchedule.start_time.slice(0,5)} - ${activeSchedule.end_time.slice(0,5)}` : null)),
-        image: activeDbBooking ? (activeDbBooking.image_filename?.startsWith('http') ? activeDbBooking.image_filename : `/data/face_scanner/${activeDbBooking.reserve_date}/${activeDbBooking.image_filename}`) : null,
+        image: activeDbBooking ? `/data/face_scanner/${activeDbBooking.reserve_date}/${activeDbBooking.image_filename}` : null,
         note: activeSchedule ? activeSchedule.note : null
     };
   };
