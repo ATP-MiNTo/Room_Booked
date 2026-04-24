@@ -31,15 +31,15 @@ class Reservation(BaseModel):
     end_time: time
 
 class SeatStatusItem(BaseModel):
-    pc_name: str      # เช่น "PC01"
-    available: int    # 1 = มีคนนั่ง, 0 = ไม่มีคน
+    pc_name: str      
+    available: int    
     pc_on: bool = False
 
 class AttendanceSyncRequest(BaseModel):
     seats: list
 
 class AttendanceUpdate(BaseModel):
-    status: str  # "present" | "absent"
+    status: str  
 
 class EditStudentRequest(BaseModel):
     first_name: str
@@ -91,13 +91,13 @@ def _build_date_filter(params, month=None, year=None, start=None, end=None, tabl
     col = f"{table_prefix}start_time" if table_prefix else "start_time"
     if year:
         clause = f" AND TO_CHAR({col}, 'YYYY') = %s"
-        params.append(year)
+        params.append(str(year))
     elif month:
         clause = f" AND TO_CHAR({col}, 'YYYY-MM') = %s"
-        params.append(month)
+        params.append(str(month))
     elif start and end:
         clause = f" AND DATE({col}) >= %s AND DATE({col}) <= %s"
-        params += [start, end]
+        params += [str(start), str(end)]
     else:
         clause = ""
     return clause
@@ -568,16 +568,10 @@ def get_bookings_range(
         if major:
             base_query += " AND s.major = %s"
             params.append(major)
-        if year:
-            base_query += " AND TO_CHAR(r.start_time, 'YYYY') = %s"
-            params.append(year)
-        elif month:
-            base_query += " AND TO_CHAR(r.start_time, 'YYYY-MM') = %s"
-            params.append(month)
-        elif start and end:
-            base_query += " AND DATE(r.start_time) >= %s AND DATE(r.start_time) <= %s"
-            params.append(start)
-            params.append(end)
+        
+        # ปรับแก้ตรงนี้ให้ส่งค่า filter ไปให้ _build_date_filter จัดการให้ถูกต้อง
+        clause = _build_date_filter(params, month=month, year=year, start=start, end=end, table_prefix="r.")
+        base_query += clause
 
         base_query += " GROUP BY DATE(r.start_time) ORDER BY DATE(r.start_time)"
         cur.execute(base_query, params)
