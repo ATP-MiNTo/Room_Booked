@@ -7,7 +7,9 @@ from datetime import datetime, date, time, timezone, timedelta
 
 from database import get_db
 
+# ==========================================
 # ตั้งค่า Cloudinary
+# ==========================================
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
     api_key=os.getenv("CLOUDINARY_API_KEY"),
@@ -84,6 +86,21 @@ def get_year_level(student_id, current_year):
         else: return "Error"
     except:
         return "Error"
+
+def _build_date_filter(params, month=None, year=None, start=None, end=None, table_prefix=""):
+    col = f"{table_prefix}start_time" if table_prefix else "start_time"
+    if year:
+        clause = f" AND TO_CHAR({col}, 'YYYY') = %s"
+        params.append(year)
+    elif month:
+        clause = f" AND TO_CHAR({col}, 'YYYY-MM') = %s"
+        params.append(month)
+    elif start and end:
+        clause = f" AND DATE({col}) >= %s AND DATE({col}) <= %s"
+        params += [start, end]
+    else:
+        clause = ""
+    return clause
 
 # ==========================================
 # APIs
@@ -296,7 +313,6 @@ def reserve_with_image(
         public_id = f"face_scanner/{reserve_date.strftime('%Y-%m-%d')}/{date_str}_Seat{seat_id:02d}_{start_str}_{end_str}_{student_id}"
         image_data = image.file.read()
 
-        # อัปโหลดรูปไป Cloudinary
         upload_result = cloudinary.uploader.upload(
             image_data,
             public_id=public_id,
@@ -676,21 +692,6 @@ def get_analytics_kpi(period: str = Query("week"), ref_date: str = Query(None), 
     finally:
         if cur: cur.close()
         if conn: conn.close()
-
-def _build_date_filter(params, month=None, year=None, start=None, end=None, table_prefix=""):
-    col = f"{table_prefix}start_time" if table_prefix else "start_time"
-    if year:
-        clause = f" AND TO_CHAR({col}, 'YYYY') = %s"
-        params.append(year)
-    elif month:
-        clause = f" AND TO_CHAR({col}, 'YYYY-MM') = %s"
-        params.append(month)
-    elif start and end:
-        clause = f" AND DATE({col}) >= %s AND DATE({col}) <= %s"
-        params += [start, end]
-    else:
-        clause = ""
-    return clause
 
 @router.get("/api/analytics/seat-usage")
 def get_seat_usage(start: str = Query(None), end: str = Query(None), month: str = Query(None), year: str = Query(None)):

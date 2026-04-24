@@ -48,7 +48,7 @@ def ensure_gregorian(d_input):
     return d_input
 
 # ==========================================
-# WebSocket Manager สำหรับ Live Monitor (เพิ่มใหม่)
+# WebSocket Manager สำหรับ Live Monitor
 # ==========================================
 class ConnectionManager:
     def __init__(self):
@@ -76,7 +76,7 @@ async def websocket_pc_updates(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # รับข้อมูลที่ส่งเข้ามา (เช่น ข้อมูล PC จากกล้อง)
+            # รับข้อมูลจาก AI/PC ตัวลูก
             data = await websocket.receive_text()
             # ทำการส่งต่อ (Broadcast) ให้กับ Client อื่นๆ ที่เปิดหน้า Monitor อยู่
             await manager.broadcast(data)
@@ -430,7 +430,7 @@ def backup_database(start_date: str = Query(...), end_date: str = Query(...), ad
                         if row.get('start_time'):
                             reserve_date = str(row['start_time'])[:10]
                         filename = url.split("/")[-1].split("?")[0]
-                        arcname = f"images/{reserve_date}/{filename}" if reserve_date else f"images/{filename}"
+                        arcname = f"face_scanner/{reserve_date}/{filename}" if reserve_date else f"face_scanner/{filename}"
                         zip_file.writestr(arcname, resp.content)
                 except Exception as e:
                     print(f"Skip image {url}: {e}")
@@ -471,9 +471,8 @@ async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str]
             # 1. แตกไฟล์ภาพลงเครื่อง เพื่อเตรียมอัปโหลด
             extracted_files = {}
             for file_info in zip_file.infolist():
-                if file_info.filename.startswith("images/") and not file_info.is_dir():
-                    rel_path = file_info.filename.replace("images/", "", 1)
-                    extracted_path = os.path.join(BASE_UPLOAD_DIR, rel_path)
+                if file_info.filename.startswith("face_scanner/") and not file_info.is_dir():
+                    extracted_path = os.path.join(BASE_UPLOAD_DIR, file_info.filename.replace("face_scanner/", "", 1))
                     os.makedirs(os.path.dirname(extracted_path), exist_ok=True)
                     with open(extracted_path, "wb") as f_out: 
                         f_out.write(zip_file.read(file_info.filename))
@@ -488,9 +487,9 @@ async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str]
                         reserve_date = str(row.get('start_time'))[:10] if row.get('start_time') else ""
                         filename = img_name.split("/")[-1].split("?")[0]
                         
-                        arcname = f"images/{reserve_date}/{filename}" if reserve_date else f"images/{filename}"
+                        arcname = f"face_scanner/{reserve_date}/{filename}" if reserve_date else f"face_scanner/{filename}"
                         if arcname not in extracted_files:
-                            arcname = f"images/{filename}"
+                            arcname = f"face_scanner/{filename}"
 
                         if arcname in extracted_files:
                             try:
@@ -520,7 +519,7 @@ async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str]
                 placeholders = ", ".join(["%s"] * len(cols))
                 pk = pk_map.get(table, 'id')
                 
-                # โค้ดเดิม ON CONFLICT DO NOTHING (ข้อมูลเก่าจะไม่ถูกทับ)
+                # ON CONFLICT DO NOTHING (ข้อมูลเก่าจะไม่ถูกทับ)
                 insert_query = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders}) ON CONFLICT ({pk}) DO NOTHING"
                 data_to_insert = [tuple(row[col] for col in cols) for row in rows]
                 cur.executemany(insert_query, data_to_insert)
