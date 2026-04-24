@@ -3,6 +3,8 @@ import zipfile
 import io
 import os
 import requests
+import cloudinary
+import cloudinary.uploader
 from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Query, Depends, Header
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -10,6 +12,15 @@ from datetime import date, time, datetime
 from typing import Optional, List
 from database import get_db
 from security import get_password_hash, verify_token
+
+# ==========================================
+# ตั้งค่า Cloudinary (เพิ่มเข้ามาใหม่)
+# ==========================================
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET")
+)
 
 router = APIRouter()
 
@@ -379,7 +390,6 @@ def backup_database(start_date: str = Query(...), end_date: str = Query(...), ad
                 try:
                     resp = requests.get(url, timeout=15)
                     if resp.status_code == 200:
-                        # ดึง folder จาก start_time เช่น 2026-04-24
                         reserve_date = ""
                         if row.get('start_time'):
                             reserve_date = str(row['start_time'])[:10]
@@ -422,6 +432,8 @@ async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str]
             backup_data = json.loads(json_data)
             os.makedirs(BASE_UPLOAD_DIR, exist_ok=True)
             
+            # 1. แตกไฟล์ภาพลงเครื่อง เพื่อเตรียมอัปโหลด
+            extracted_files = {}
             for file_info in zip_file.infolist():
                 if file_info.filename.startswith("images/") and not file_info.is_dir():
                     rel_path = file_info.filename.replace("images/", "", 1)
@@ -429,6 +441,34 @@ async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str]
                     os.makedirs(os.path.dirname(extracted_path), exist_ok=True)
                     with open(extracted_path, "wb") as f_out: 
                         f_out.write(zip_file.read(file_info.filename))
+                    extracted_files[file_info.filename] = extracted_path
+
+            # 2. นำภาพอัปโหลดขึ้น Cloudinary ทันที
+            if 'reservations' in backup_data:
+                for row in backup_data['reservations']:
+                    img_name = row.get('image_name')
+                    # ถ้าไม่ใช่ URL http ให้จับอัปโหลด
+                    if img_name and not str(img_name).startswith("http"):
+                        reserve_date = str(row.get('start_time'))[:10] if row.get('start_time') else ""
+                        filename = img_name.split("/")[-1].split("?")[0]
+                        
+                        arcname = f"images/{reserve_date}/{filename}" if reserve_date else f"images/{filename}"
+                        if arcname not in extracted_files:
+                            arcname = f"images/{filename}"
+
+                        if arcname in extracted_files:
+                            try:
+                                public_id = f"face_scanner/{reserve_date}/{filename.split('.')[0]}" if reserve_date else f"face_scanner/{filename.split('.')[0]}"
+                                upload_result = cloudinary.uploader.upload(
+                                    extracted_files[arcname],
+                                    public_id=public_id,
+                                    overwrite=True,
+                                    resource_type="image"
+                                )
+                                # แทนที่ค่า URL ใหม่เป็นของ Cloudinary
+                                row['image_name'] = upload_result["secure_url"]
+                            except Exception as e:
+                                print(f"Cloudinary Upload Error during Migration: {e}")
         
         conn = get_db()
         cur = conn.cursor()
@@ -444,6 +484,7 @@ async def migrate_database(file: UploadFile = File(...), admin_id: Optional[str]
                 placeholders = ", ".join(["%s"] * len(cols))
                 pk = pk_map.get(table, 'id')
                 
+                # โค้ดเดิม ON CONFLICT DO NOTHING (ข้อมูลเก่าจะไม่ถูกทับ)
                 insert_query = f"INSERT INTO {table} ({col_names}) VALUES ({placeholders}) ON CONFLICT ({pk}) DO NOTHING"
                 data_to_insert = [tuple(row[col] for col in cols) for row in rows]
                 cur.executemany(insert_query, data_to_insert)
@@ -502,20 +543,20 @@ def get_system_logs(admin=Depends(verify_token)):
 class AdminCreate(BaseModel):
     staff_id: str
     first_name: str
-    last_name: Optional[str] = None      # 🟢 ต้องมี = None
-    department: Optional[str] = None     # 🟢 ต้องมี = None
-    position: Optional[str] = None       # 🟢 ต้องมี = None
+    last_name: Optional[str] = None
+    department: Optional[str] = None
+    position: Optional[str] = None
     username: str
     password: str
     priority: int = 3
 
 class AdminUpdate(BaseModel):
     first_name: str
-    last_name: Optional[str] = None      # 🟢 ต้องมี = None
-    department: Optional[str] = None     # 🟢 ต้องมี = None
-    position: Optional[str] = None       # 🟢 ต้องมี = None
+    last_name: Optional[str] = None
+    department: Optional[str] = None
+    position: Optional[str] = None
     username: str
-    password: Optional[str] = None       # 🟢 ต้องมี = None
+    password: Optional[str] = None
     priority: int
 
 @router.get("/api/admins")
@@ -564,10 +605,7 @@ def create_admin(admin: AdminCreate, current_admin=Depends(verify_token)):
         if cur.fetchone():
             raise HTTPException(status_code=400, detail="รหัสพนักงาน หรือ Username นี้มีผู้ใช้งานแล้ว")
 
-        # ✅ Hash รหัสผ่านก่อน INSERT เข้า Database
         hashed_pw = get_password_hash(admin.password)
-
-        # 🟢 ดักค่า None ไว้ เผื่อตอน Insert ถ้าเป็น None ก็จะได้ค่า Null ใน DB หรือ '-' (ถ้าต้องการ)
         last_name_val = admin.last_name if admin.last_name else ""
         department_val = admin.department if admin.department else ""
         position_val = admin.position if admin.position else ""
@@ -605,13 +643,11 @@ def update_admin(staff_id: str, admin: AdminUpdate, current_admin=Depends(verify
         if cur.fetchone():
             raise HTTPException(status_code=400, detail="Username นี้มีผู้ใช้อื่นใช้งานแล้ว")
 
-        # 🟢 จัดการค่า None ให้ปลอดภัย
         last_name_val = admin.last_name if admin.last_name else ""
         department_val = admin.department if admin.department else ""
         position_val = admin.position if admin.position else ""
 
         if admin.password and admin.password.strip() != "":
-            # ✅ Hash รหัสผ่านใหม่ก่อน UPDATE
             hashed_pw = get_password_hash(admin.password)
             cur.execute("""
                 UPDATE admins 
