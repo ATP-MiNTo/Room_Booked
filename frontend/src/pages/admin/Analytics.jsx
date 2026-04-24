@@ -226,12 +226,41 @@ export default function Analytics() {
 
       if (resTrend.ok) {
         const raw = await resTrend.json();
+        
         if (timeFilter === 'year') {
+          // จัดกลุ่มยอดตามเดือน 1-12
           const monthly = Array(12).fill(0);
           raw.forEach(r => { monthly[new Date(r.date).getMonth()] += r.total; });
           setTrendData(THAI_MONTHS_SHORT.map((m, i) => ({ name: m, 'จองและนั่ง': monthly[i], 'จองแต่ไม่นั่ง': 0, 'ไม่จองแต่นั่ง': 0 })));
+          
+        } else if (timeFilter === 'month') {
+          // สร้างวันที่ 1 ถึง 30/31 สำหรับแกน X ของรายเดือน
+          const daysInMonth = new Date(selMonth.year, selMonth.month, 0).getDate();
+          const daily = Array(daysInMonth).fill(0);
+          
+          raw.forEach(r => {
+             const dayIndex = parseInt(r.day || new Date(r.date).getDate()) - 1;
+             if (dayIndex >= 0 && dayIndex < daysInMonth) {
+                 daily[dayIndex] += r.total;
+             }
+          });
+          
+          const monthData = Array.from({ length: daysInMonth }, (_, i) => ({
+             name: `${i + 1}`,
+             'จองและนั่ง': daily[i],
+             'จองแต่ไม่นั่ง': 0,
+             'ไม่จองแต่นั่ง': 0
+          }));
+          setTrendData(monthData);
+
         } else {
-          setTrendData(raw.map(r => ({ name: r.day ? `${r.day}` : formatTrendLabel(r.date), 'จองและนั่ง': r.total, 'จองแต่ไม่นั่ง': 0, 'ไม่จองแต่นั่ง': 0 })));
+          // สำหรับรายวัน หรือ รายสัปดาห์
+          setTrendData(raw.map(r => ({ 
+             name: r.day ? `${r.day}` : formatTrendLabel(r.date), 
+             'จองและนั่ง': r.total, 
+             'จองแต่ไม่นั่ง': 0, 
+             'ไม่จองแต่นั่ง': 0 
+          })));
         }
       } else { setTrendData([]); }
 
@@ -240,7 +269,7 @@ export default function Analytics() {
       if (resMajor.ok)  setByMajor(await resMajor.json());       else setByMajor([]);
       if (resYearLv.ok) {
         const yd = await resYearLv.json();
-        setByYear(yd.filter(i => i.year !== 'Error (เลขแปลกๆ)' && i.year !== 'รีไทร์ (เกิน 10 ปี)'));
+        setByYear(yd.filter(i => i.year !== 'Error' && i.year !== 'รีไทร์'));
       } else { setByYear([]); }
 
     } catch (e) {
@@ -249,7 +278,7 @@ export default function Analytics() {
     } finally {
       setIsLoading(false);
     }
-  }, [timeFilter, getApiParams, getKpiPeriodParams]);
+  }, [timeFilter, getApiParams, getKpiPeriodParams, selMonth.year, selMonth.month]);
 
   useEffect(() => { fetchAllData(); }, [fetchAllData]);
 
@@ -374,7 +403,7 @@ export default function Analytics() {
               <StatCard title="จองและนั่ง"    value={kpiData.totalNormal}  icon={<RiUserFollowLine size={24}/>}   trend={kpiData.trendNormal}  trendCount={kpiData.trendNormalCount}  color={STATUS_COLORS.normal} bgColor="#f6ffed"/>
               <StatCard title="จองแต่ไม่มานั่ง" value={kpiData.totalNoShow}  icon={<RiUserUnfollowLine size={24}/>} trend={kpiData.trendNoShow}  trendCount={kpiData.trendNoShowCount}  color={STATUS_COLORS.noshow} bgColor="#fffbe6"/>
               <StatCard title="ไม่จองแต่นั่ง" value={kpiData.totalWalkin}  icon={<RiUserForbidLine size={24}/>}  trend={kpiData.trendWalkin}  trendCount={kpiData.trendWalkinCount}  color={STATUS_COLORS.walkin} bgColor="#fff1f0"/>
-              <StatCard title="เครื่องขัดข้อง"  value={kpiData.broken}       icon={<RiToolsFill size={24}/>}       color={STATUS_COLORS.broken} bgColor="#f1f5f9"/>
+              <StatCard title="เครื่องขัดข้อง"  value={kpiData.broken}       icon={<RiToolsFill size={24}/>}      color={STATUS_COLORS.broken} bgColor="#f1f5f9"/>
             </div>
 
             <div style={{ ...pageStyles.card, background: '#fff1f0', border: '1px solid #ffa39e', marginBottom: '30px' }}>
