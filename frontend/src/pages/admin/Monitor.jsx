@@ -54,9 +54,11 @@ export default function Monitor() {
   }, []);
 
   useEffect(() => {
+    const cameraUrl = import.meta.env.VITE_CAMERA_WS_URL;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = import.meta.env.VITE_CAMERA_WS_URL 
-      || `${protocol}//${window.location.host}/ws/pc-updates`;
+    const wsUrl = cameraUrl
+      ? `${cameraUrl.replace('https://', 'wss://')}/ws/pc-updates`
+      : `${protocol}//${window.location.host}/ws/pc-updates`;
     
     const ws = new WebSocket(wsUrl);
 
