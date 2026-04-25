@@ -142,7 +142,16 @@ export default function Monitor() {
   };
 
 const forceEndBooking = async (studentId) => {
-  const confirm = await Swal.fire({ /* ... */ });
+  const confirm = await Swal.fire({ 
+    title: 'ยืนยันการยกเลิกการจอง?',
+    text: `คุณต้องการบังคับยกเลิกการจองของรหัสนักศึกษา ${studentId} ใช่หรือไม่?`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#cf1322',
+    cancelButtonColor: '#64748b',
+    confirmButtonText: 'ใช่, บังคับยกเลิก',
+    cancelButtonText: 'ปิด'
+  });
 
   if (confirm.isConfirmed) {
     try {
