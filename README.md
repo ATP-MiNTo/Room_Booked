@@ -153,19 +153,6 @@ VITE_CAMERA_WS_URL=https://xxxx.ngrok-free.app
 
 ```bash
 
-3CXCF1otbQhXEzXBF22hIB3VPjF_7M2rSkxFRdfarVCkSjTug
-
-.\.venv\Scripts\Activate.ps1
-.venv\Scripts\python.exe threaded.py
-
-
-.\.venv\Scripts\Activate.ps1
-.venv\Scripts\python.exe api.py
-
-
-.\ngrok.exe http 8000
-
-
 # 1. สร้าง password hash
 python -c "import bcrypt; print(bcrypt.hashpw('admin1234'.encode(), bcrypt.gensalt()).decode())"
 
