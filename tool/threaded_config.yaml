@@ -24,7 +24,71 @@ WINDOWS_HEIGHT: 540
 # Detection thresholds and ROI snapshot frequency.
 CONF_THRESHOLD: 0.4
 IOU_THRESHOLD: 0.4
+CONF_THRESHOLD_MODE: dynamic
+IOU_THRESHOLD_MODE: dynamic
 SAVE_INTERVAL_SEC: 4
+PC_CONF_THRESHOLD_OVERRIDES:
+  PC1: 0.25
+  PC2: 0.25
+  PC3: 0.25
+  PC4: 0.25
+  PC5: 0.4
+  PC6: 0.25
+  PC7: 0.25
+  PC8: 0.4
+  PC9: 0.4
+  PC10: 0.4
+  PC11: 0.4
+  PC12: 0.3
+  PC13: 0.25
+  PC14: 0.25
+  PC15: 0.25
+  PC16: 0.25
+  PC17: 0.25
+  PC18: 0.25
+  PC19: 0.25
+  PC20: 0.3
+  PC21: 0.25
+  PC22: 0.5
+  PC23: 0.25
+  PC24: 0.25
+  PC25: 0.4
+  PC26: 0.45
+  PC27: 0.45
+  PC28: 0.25
+  PC29: 0.4
+  PC30: 0.45
+PC_IOU_THRESHOLD_OVERRIDES:
+  PC1: 0.4
+  PC2: 0.4
+  PC3: 0.4
+  PC4: 0.4
+  PC5: 0.4
+  PC6: 0.4
+  PC7: 0.4
+  PC8: 0.4
+  PC9: 0.4
+  PC10: 0.4
+  PC11: 0.4
+  PC12: 0.4
+  PC13: 0.4
+  PC14: 0.4
+  PC15: 0.4
+  PC16: 0.4
+  PC17: 0.4
+  PC18: 0.4
+  PC19: 0.4
+  PC20: 0.4
+  PC21: 0.4
+  PC22: 0.4
+  PC23: 0.4
+  PC24: 0.4
+  PC25: 0.4
+  PC26: 0.4
+  PC27: 0.4
+  PC28: 0.4
+  PC29: 0.4
+  PC30: 0.4
 
 # Live-mode detection schedule (24-hour local time).
 DETECTION_START_HOUR_24: 8
@@ -43,11 +107,11 @@ MONITOR_STATE_STABLE_FRAMES: 3
 ROI_CONFIG_DIR: tool/roi_config
 CSV_SUFFIX: _roi.csv
 MONITOR_CSV_SUFFIX: _monitor_roi.csv
-ROW_ZONE_CSV_SUFFIX: _row_zone_roi.csv
-ENABLE_ROW_RECONCILIATION: true
-ROW_RELINK_MAX_MISSING_SEC: 3.0
-ROW_SUDDEN_APPEAR_WINDOW_SEC: 4.0
-ROW_DISAPPEAR_ASSIGN_DWELL_SEC: 2.0
+GATE_ROI_CSV_SUFFIX: _gate_roi.csv
+ENABLE_GATE_ASSIGNMENT: true
+GATE_RELINK_MAX_MISSING_SEC: 3.0
+GATE_SUDDEN_APPEAR_WINDOW_SEC: 4.0
+GATE_DISAPPEAR_ASSIGN_DWELL_SEC: 2.0
 
 # Runtime performance controls.
 # PROCESS_EVERY_N_FRAMES reduces inference load; SMOOTH_WINDOW_SEC stabilizes counters/states.

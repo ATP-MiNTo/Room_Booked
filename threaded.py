@@ -36,6 +36,47 @@ def _require_config_value(config, key):
     return config[key]
 
 
+def _normalize_pc_conf_threshold_map(raw_map):
+    normalized = {}
+    if not isinstance(raw_map, dict):
+        return normalized
+
+    for key, value in raw_map.items():
+        pc_name = str(key).strip()
+        if not pc_name:
+            continue
+        try:
+            threshold = float(value)
+        except Exception:
+            continue
+        normalized[pc_name] = max(0.0, min(1.0, threshold))
+    return normalized
+
+
+def _normalize_pc_iou_threshold_map(raw_map):
+    normalized = {}
+    if not isinstance(raw_map, dict):
+        return normalized
+
+    for key, value in raw_map.items():
+        pc_name = str(key).strip()
+        if not pc_name:
+            continue
+        try:
+            threshold = float(value)
+        except Exception:
+            continue
+        normalized[pc_name] = max(0.0, min(1.0, threshold))
+    return normalized
+
+
+def _normalize_threshold_mode(raw_mode, default_mode="dynamic"):
+    mode_text = str(raw_mode).strip().lower()
+    if mode_text in ("dynamic", "fixed"):
+        return mode_text
+    return str(default_mode).strip().lower()
+
+
 def load_runtime_config(config_path):
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -72,7 +113,17 @@ Windows_height = int(_require_config_value(CONFIG, "WINDOWS_HEIGHT"))
 # Detection settings
 CONF_THRESHOLD = float(_require_config_value(CONFIG, "CONF_THRESHOLD"))
 IOU_THRESHOLD = float(_require_config_value(CONFIG, "IOU_THRESHOLD"))
+CONF_THRESHOLD_MODE = _normalize_threshold_mode(CONFIG.get("CONF_THRESHOLD_MODE", "dynamic"), "dynamic")
+IOU_THRESHOLD_MODE = _normalize_threshold_mode(CONFIG.get("IOU_THRESHOLD_MODE", "dynamic"), "dynamic")
 SAVE_INTERVAL_SEC = float(_require_config_value(CONFIG, "SAVE_INTERVAL_SEC"))
+PC_CONF_THRESHOLD_OVERRIDES = _normalize_pc_conf_threshold_map(CONFIG.get("PC_CONF_THRESHOLD_OVERRIDES", {}))
+PC_IOU_THRESHOLD_OVERRIDES = _normalize_pc_iou_threshold_map(CONFIG.get("PC_IOU_THRESHOLD_OVERRIDES", {}))
+PEOPLE_COUNT_DWELL_SEC = 2.0
+MIN_CONF_THRESHOLD = (
+    min([CONF_THRESHOLD] + list(PC_CONF_THRESHOLD_OVERRIDES.values()))
+    if (CONF_THRESHOLD_MODE == "dynamic" and PC_CONF_THRESHOLD_OVERRIDES)
+    else CONF_THRESHOLD
+)
 
 # Detection schedule settings
 DETECTION_START_HOUR_24 = int(_require_config_value(CONFIG, "DETECTION_START_HOUR_24"))
@@ -183,7 +234,7 @@ except Exception:
 # set model confidence threshold globally to reduce post-processing
 try:
     # some ultralytics versions expose a conf attribute
-    model.conf = CONF_THRESHOLD
+    model.conf = MIN_CONF_THRESHOLD
     model.iou = IOU_THRESHOLD
 except Exception:
     # ignore if attribute not present
@@ -317,6 +368,62 @@ def update_roi_motion_timestamps(fg_mask, pc_rois, now_ts, last_roi_motion_ts):
 
     return active_assist
 
+
+def get_conf_threshold_for_pc(pc_name):
+    if CONF_THRESHOLD_MODE == "fixed":
+        return float(CONF_THRESHOLD)
+    if not pc_name:
+        return float(CONF_THRESHOLD)
+    return float(PC_CONF_THRESHOLD_OVERRIDES.get(str(pc_name).strip(), CONF_THRESHOLD))
+
+
+def get_iou_threshold_for_pc(pc_name):
+    if IOU_THRESHOLD_MODE == "fixed":
+        return float(IOU_THRESHOLD)
+    if not pc_name:
+        return float(IOU_THRESHOLD)
+    return float(PC_IOU_THRESHOLD_OVERRIDES.get(str(pc_name).strip(), IOU_THRESHOLD))
+
+
+def box_iou(box_a, box_b):
+    ax1, ay1, ax2, ay2 = [float(v) for v in box_a[:4]]
+    bx1, by1, bx2, by2 = [float(v) for v in box_b[:4]]
+
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+    if inter_area <= 0.0:
+        return 0.0
+
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    denom = area_a + area_b - inter_area
+    if denom <= 0.0:
+        return 0.0
+    return inter_area / denom
+
+
+def apply_pc_nms_candidates(candidates, iou_threshold, conf_threshold):
+    sorted_candidates = sorted(candidates, key=lambda item: float(item[4]), reverse=True)
+    kept = []
+    for candidate in sorted_candidates:
+        conf = float(candidate[4])
+        if conf <= float(conf_threshold):
+            continue
+        suppressed = False
+        for kept_candidate in kept:
+            if box_iou(candidate, kept_candidate) > float(iou_threshold):
+                suppressed = True
+                break
+        if not suppressed:
+            kept.append(candidate)
+    return kept
+
 def to_safe_label(value):
     """Convert a display label into a filesystem-safe name."""
     cleaned = "".join((c if c.isalnum() or c in ("-", "_") else "_") for c in str(value).strip())
@@ -439,6 +546,35 @@ def match_box_to_person(box, tracked_persons, now_ts, unavailable_ids=None):
     return matched_id
 
 
+def match_box_to_recent_hold_track(box, tracked_persons, now_ts, unavailable_ids=None):
+    """Fallback matcher: reuse a nearby recently-missing track before creating a new ID."""
+    blocked_ids = unavailable_ids or set()
+    best_score = float("inf")
+    matched_id = None
+
+    for pid, pdata in tracked_persons.items():
+        if pid in blocked_ids:
+            continue
+
+        last_box = pdata.get("last_box")
+        if not last_box:
+            continue
+
+        last_seen_ts = float(pdata.get("last_seen_ts", now_ts))
+        missing_sec = max(0.0, float(now_ts) - last_seen_ts)
+        if missing_sec <= 0.0 or missing_sec > TRACK_MAX_MISSING_SEC:
+            continue
+
+        # Use the most recently seen box with a slightly wider gate for short re-acquisition windows.
+        dist = distance(box, last_box)
+        allowed_dist = max(TRACK_MATCH_DISTANCE_PX * 1.5, TRACK_MATCH_DISTANCE_PX + 30.0)
+        if dist <= allowed_dist and dist < best_score:
+            best_score = dist
+            matched_id = pid
+
+    return matched_id
+
+
 def prune_stale_tracks(tracked_persons, now_ts):
     stale_ids = []
     for pid, pdata in tracked_persons.items():
@@ -500,6 +636,9 @@ def new_pc_state(pc_name):
         "current_person_id": None,
         "last_person_id": None,
         "last_person_seen_time": None,
+        "current_pc": None,
+        "pc_enter_time": None,
+        "assigned_pc": None,
         "overlap_start_time": None,
         "empty_since_time": None,
         "person_event_logged": False,
@@ -998,6 +1137,8 @@ def build_camera_states():
             "person_count_raw": 0,
             "person_count_smoothed": 0,
             "detection_active_last": None,
+            "last_pc_people_counts": {},
+            "last_pc_raw_box_candidates": {},
             # performance tracking
             "frames_seen": 0,
             "total_latency_ms": 0.0,
@@ -1137,24 +1278,51 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 
                 pc_to_person = {}
                 matched_track_ids = set()
+                pc_kept_candidates = {pc_name: [] for pc_name in cam_data.get("pc_states", {}).keys()}
+                pc_raw_box_candidates = {pc_name: [] for pc_name in cam_data.get("pc_states", {}).keys()}
 
                 for box in results[0].boxes:
                     cls = int(box.cls[0])
                     conf = float(box.conf[0])
-                    if cls in PERSON_CLASS_IDS and conf > CONF_THRESHOLD:
-                        person_count += 1
+                    if cls in PERSON_CLASS_IDS:
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         current_box = (x1, y1, x2, y2)
-                        
+
                         # determine which PC this person is in
                         current_pc = get_pc_for_box(current_box, cam_data["pc_rois"]) if ENABLE_PC_ROI else None
-                        
+                        conf_threshold = get_conf_threshold_for_pc(current_pc)
+                        if conf <= conf_threshold:
+                            continue
+
+                        # Apply per-seat IoU suppression for overlapping duplicate boxes in the same PC ROI.
+                        if current_pc and current_pc in pc_kept_candidates:
+                            current_with_conf = (x1, y1, x2, y2, float(conf))
+                            iou_threshold = get_iou_threshold_for_pc(current_pc)
+                            pc_raw_box_candidates[current_pc].append(current_with_conf)
+                            suppressed = False
+                            for kept_candidate in pc_kept_candidates[current_pc]:
+                                if box_iou(current_with_conf, kept_candidate) > iou_threshold:
+                                    suppressed = True
+                                    break
+                            if suppressed:
+                                continue
+                            pc_kept_candidates[current_pc].append(current_with_conf)
+
+                        person_count += 1
+
                         matched_id = match_box_to_person(
                             current_box,
                             cam_data["tracked_persons"],
                             frame_start,
                             unavailable_ids=matched_track_ids,
                         )
+                        if matched_id is None:
+                            matched_id = match_box_to_recent_hold_track(
+                                current_box,
+                                cam_data["tracked_persons"],
+                                frame_start,
+                                unavailable_ids=matched_track_ids,
+                            )
                         if matched_id is not None:
                             matched_track_ids.add(matched_id)
                             pdata = cam_data["tracked_persons"][matched_id]
@@ -1262,6 +1430,28 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 
                 prune_stale_tracks(cam_data["tracked_persons"], frame_start)
 
+                pc_people_counts = {}
+                for pc_name, candidates in pc_raw_box_candidates.items():
+                    conf_threshold = get_conf_threshold_for_pc(pc_name)
+                    iou_threshold = get_iou_threshold_for_pc(pc_name)
+                    kept_candidates = apply_pc_nms_candidates(candidates, iou_threshold, conf_threshold)
+                    pc_people_counts[pc_name] = len(kept_candidates)
+
+                cam_data["last_pc_people_counts"] = pc_people_counts
+                cam_data["last_pc_raw_box_candidates"] = {
+                    pc_name: [
+                        [int(b[0]), int(b[1]), int(b[2]), int(b[3]), round(float(b[4]), 4)]
+                        for b in sorted(candidates, key=lambda item: float(item[4]), reverse=True)
+                    ]
+                    for pc_name, candidates in pc_raw_box_candidates.items()
+                }
+
+                person_count = sum(
+                    1
+                    for pdata in cam_data["tracked_persons"].values()
+                    if max(0.0, frame_start - float(pdata.get("last_seen_ts", frame_start))) <= TRACK_MAX_MISSING_SEC
+                )
+
                 pc_to_person_map = {pc_name: data[1] for pc_name, data in pc_to_person.items()}
                 update_pc_states_from_monitor(frame, cam_data.get("monitor_rois", []), cam_data.get("pc_states", {}), frame_start)
                 update_pc_activity_events(
@@ -1290,7 +1480,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     )
 
             if detection_active:
-                raw_people_for_smoothing = person_count if do_infer else cam_data.get("person_count_raw", 0)
+                raw_people_for_smoothing = person_count
                 smoothed_people = update_smoothed_person_count(cam_data, raw_people_for_smoothing, frame_start)
                 cv2.putText(frame, f"People: {smoothed_people}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 if do_infer:
