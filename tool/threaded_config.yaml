@@ -64,6 +64,21 @@ TRACK_MAX_PREDICTION_SPEED_PX_PER_SEC: 600.0
 SMOOTH_WINDOW_SEC: 5.0
 HOLD_VISUAL_MIN_SEC: 0.35
 
+# Motion gating + periodic fallback (hybrid strategy)
+# Inference runs when motion is detected OR when PERIODIC_INFER_SEC is due.
+ENABLE_MOTION_GATING: true
+MOTION_SUBTRACTOR_METHOD: MOG2
+MOTION_DETECT_SHADOWS: false
+MOTION_MIN_AREA_RATIO: 0.0025
+MOTION_MORPH_KERNEL: 3
+MOTION_BLUR_KERNEL: 5
+MOTION_WARMUP_FRAMES: 60
+PERIODIC_INFER_SEC: 1.5
+
+# BG-sub ROI refinement (short-term assist only, not long-term authority)
+ROI_MOTION_ASSIST_SEC: 1.2
+ROI_MOTION_MIN_AREA_RATIO: 0.006
+
 # Sudden disappear detection: corner margin as fraction of frame (18% = near edges).
 SUDDEN_DISAPPEAR_CORNER_MARGIN_RATIO: 0.18
 

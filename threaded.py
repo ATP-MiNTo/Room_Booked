@@ -122,6 +122,18 @@ TRACK_MAX_PREDICTION_SPEED_PX_PER_SEC = max(
 )
 SMOOTH_WINDOW_SEC = max(0.0, float(_require_config_value(CONFIG, "SMOOTH_WINDOW_SEC")))
 
+# Motion gating / BG-sub refinement settings
+ENABLE_MOTION_GATING = bool(_require_config_value(CONFIG, "ENABLE_MOTION_GATING"))
+MOTION_SUBTRACTOR_METHOD = str(_require_config_value(CONFIG, "MOTION_SUBTRACTOR_METHOD")).strip().upper()
+MOTION_DETECT_SHADOWS = bool(_require_config_value(CONFIG, "MOTION_DETECT_SHADOWS"))
+MOTION_MIN_AREA_RATIO = max(0.0, float(_require_config_value(CONFIG, "MOTION_MIN_AREA_RATIO")))
+MOTION_MORPH_KERNEL = max(1, int(_require_config_value(CONFIG, "MOTION_MORPH_KERNEL")))
+MOTION_BLUR_KERNEL = max(1, int(_require_config_value(CONFIG, "MOTION_BLUR_KERNEL")))
+MOTION_WARMUP_FRAMES = max(0, int(_require_config_value(CONFIG, "MOTION_WARMUP_FRAMES")))
+PERIODIC_INFER_SEC = max(0.1, float(_require_config_value(CONFIG, "PERIODIC_INFER_SEC")))
+ROI_MOTION_ASSIST_SEC = max(0.0, float(_require_config_value(CONFIG, "ROI_MOTION_ASSIST_SEC")))
+ROI_MOTION_MIN_AREA_RATIO = max(0.0, float(_require_config_value(CONFIG, "ROI_MOTION_MIN_AREA_RATIO")))
+
 # Realtime PC-state CSV settings
 ENABLE_REALTIME_PC_STATE_CSV = bool(_require_config_value(CONFIG, "ENABLE_REALTIME_PC_STATE_CSV"))
 REALTIME_PC_STATE_WRITE_INTERVAL_SEC = float(_require_config_value(CONFIG, "REALTIME_PC_STATE_WRITE_INTERVAL_SEC"))
@@ -231,6 +243,79 @@ def run_model_inference(frame):
                 return model(frame, verbose=False)
             except Exception:
                 raise
+
+
+def _make_motion_subtractor():
+    history = 500
+    if MOTION_SUBTRACTOR_METHOD == "KNN":
+        return cv2.createBackgroundSubtractorKNN(
+            history=history,
+            dist2Threshold=400.0,
+            detectShadows=MOTION_DETECT_SHADOWS,
+        )
+
+    return cv2.createBackgroundSubtractorMOG2(
+        history=history,
+        varThreshold=16.0,
+        detectShadows=MOTION_DETECT_SHADOWS,
+    )
+
+
+def compute_motion_foreground(gray_frame, subtractor):
+    """Return binary foreground mask and global foreground area ratio."""
+    if subtractor is None:
+        h, w = gray_frame.shape[:2]
+        return np.zeros((h, w), dtype=np.uint8), 0.0
+
+    blur_k = MOTION_BLUR_KERNEL if (MOTION_BLUR_KERNEL % 2 == 1) else (MOTION_BLUR_KERNEL + 1)
+    blur_k = max(1, blur_k)
+    if blur_k > 1:
+        gray_frame = cv2.GaussianBlur(gray_frame, (blur_k, blur_k), 0)
+
+    fg_mask = subtractor.apply(gray_frame)
+    _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
+
+    kernel = np.ones((MOTION_MORPH_KERNEL, MOTION_MORPH_KERNEL), dtype=np.uint8)
+    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
+
+    fg_pixels = float(np.count_nonzero(fg_mask))
+    total_pixels = float(fg_mask.shape[0] * fg_mask.shape[1]) if fg_mask.size else 1.0
+    motion_ratio = fg_pixels / max(1.0, total_pixels)
+    return fg_mask, motion_ratio
+
+
+def update_roi_motion_timestamps(fg_mask, pc_rois, now_ts, last_roi_motion_ts):
+    """Update per-ROI motion timestamps and return active short-term assist flags."""
+    active_assist = {}
+    if fg_mask is None or not pc_rois:
+        return active_assist
+
+    for roi in pc_rois:
+        pc_name = str(roi.get("pc_name", "")).strip()
+        polygon = roi.get("polygon")
+        if not pc_name or polygon is None:
+            continue
+
+        roi_mask = np.zeros(fg_mask.shape, dtype=np.uint8)
+        cv2.fillPoly(roi_mask, [polygon], 255)
+        roi_total = float(np.count_nonzero(roi_mask))
+        if roi_total <= 0:
+            continue
+
+        roi_fg = cv2.bitwise_and(fg_mask, fg_mask, mask=roi_mask)
+        roi_ratio = float(np.count_nonzero(roi_fg)) / roi_total
+        if roi_ratio >= ROI_MOTION_MIN_AREA_RATIO:
+            last_roi_motion_ts[pc_name] = float(now_ts)
+
+        last_ts = last_roi_motion_ts.get(pc_name)
+        active_assist[pc_name] = (
+            (last_ts is not None)
+            and (ROI_MOTION_ASSIST_SEC > 0.0)
+            and ((float(now_ts) - float(last_ts)) <= ROI_MOTION_ASSIST_SEC)
+        )
+
+    return active_assist
 
 def to_safe_label(value):
     """Convert a display label into a filesystem-safe name."""
@@ -497,11 +582,39 @@ def update_pc_states_from_monitor(frame, monitor_rois, pc_states, now_ts):
         state["last_update_time"] = now_ts
 
 
-def update_pc_activity_events(cam_name, pc_states, pc_to_person, now_ts, pc_event_logs, pc_unattended_logs):
+def update_pc_activity_events(
+    cam_name,
+    pc_states,
+    pc_to_person,
+    now_ts,
+    pc_event_logs,
+    pc_unattended_logs,
+    roi_motion_assist=None,
+):
     now_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now_ts))
 
     for pc_name, state in pc_states.items():
         person_id = pc_to_person.get(pc_name)
+        assist_active = bool(roi_motion_assist and roi_motion_assist.get(pc_name))
+
+        # Short-term assist only: if ROI still has motion and we recently saw a person,
+        # keep occupancy briefly without creating a new long-running assignment.
+        if not person_id and assist_active:
+            last_person_id = state.get("last_person_id")
+            last_seen = state.get("last_person_seen_time")
+            if (
+                last_person_id
+                and last_seen is not None
+                and (float(now_ts) - float(last_seen)) <= ROI_MOTION_ASSIST_SEC
+            ):
+                state["person_present"] = True
+                state["current_person_id"] = last_person_id
+                state["empty_since_time"] = None
+                if state.get("pc_on"):
+                    set_pc_available_state(state, 2, now_ts)
+                else:
+                    set_pc_available_state(state, 1, now_ts)
+                continue
 
         if person_id:
             if state.get("current_person_id") != person_id:
@@ -864,6 +977,7 @@ def build_camera_states():
                 print(f"{cam_name}: loaded {len(monitor_rois)} monitor ROI(s)")
 
         pc_states = init_pc_states(pc_rois, monitor_rois)
+        motion_subtractor = _make_motion_subtractor() if ENABLE_MOTION_GATING else None
         cams[cam_idx] = {
             "cap": cap,
             "tracked_persons": {},
@@ -897,6 +1011,13 @@ def build_camera_states():
             "pc_states": pc_states,
             "pc_event_logs": [],
             "pc_unattended_logs": [],
+            "motion_subtractor": motion_subtractor,
+            "motion_warmup_done": False,
+            "motion_warmup_frames": 0,
+            "last_infer_ts": None,
+            "last_motion_ratio": 0.0,
+            "last_roi_motion_ts": {},
+            "last_roi_motion_assist": {},
         }
         os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
         os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
@@ -960,9 +1081,44 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
 
             # increment per-camera frame counter and decide whether to run inference
             cam_data["frame_counter"] += 1
-            do_infer = detection_active and (
+            frame_due = (
                 (cam_data["frame_counter"] % cam_data["process_every_n_frames"] == 0)
                 or (cam_data["last_annotated_frame"] is None)
+            )
+
+            motion_detected = True
+            fg_mask = None
+            if detection_active and ENABLE_MOTION_GATING:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                fg_mask, motion_ratio = compute_motion_foreground(gray, cam_data.get("motion_subtractor"))
+                cam_data["last_motion_ratio"] = motion_ratio
+
+                warmup_frames = int(cam_data.get("motion_warmup_frames", 0))
+                if warmup_frames < MOTION_WARMUP_FRAMES:
+                    cam_data["motion_warmup_frames"] = warmup_frames + 1
+                    motion_detected = True
+                else:
+                    cam_data["motion_warmup_done"] = True
+                    motion_detected = motion_ratio >= MOTION_MIN_AREA_RATIO
+
+                cam_data["last_roi_motion_assist"] = update_roi_motion_timestamps(
+                    fg_mask,
+                    cam_data.get("pc_rois", []),
+                    frame_start,
+                    cam_data.setdefault("last_roi_motion_ts", {}),
+                )
+
+            periodic_due = False
+            last_infer_ts = cam_data.get("last_infer_ts")
+            if detection_active:
+                if last_infer_ts is None:
+                    periodic_due = True
+                else:
+                    periodic_due = (frame_start - float(last_infer_ts)) >= PERIODIC_INFER_SEC
+
+            do_infer = detection_active and (
+                periodic_due
+                or (frame_due and ((not ENABLE_MOTION_GATING) or motion_detected))
             )
 
             person_count = 0
@@ -972,6 +1128,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 inf_start = time.time()
                 results = run_model_inference(frame)
                 inf_end = time.time()
+                cam_data["last_infer_ts"] = frame_start
                 cam_data["inference_runs"] += 1
                 cam_data["total_inference_time_ms"] += (inf_end - inf_start) * 1000.0
 
@@ -1114,6 +1271,7 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     frame_start,
                     cam_data.get("pc_event_logs", []),
                     cam_data.get("pc_unattended_logs", []),
+                    roi_motion_assist=cam_data.get("last_roi_motion_assist", {}),
                 )
             else:
                 if detection_active:
