@@ -4,6 +4,17 @@
 
 3CXCF1otbQhXEzXBF22hIB3VPjF_7M2rSkxFRdfarVCkSjTug
 
+.\.venv\Scripts\Activate.ps1
+.venv\Scripts\python.exe threaded.py
+
+
+.\.venv\Scripts\Activate.ps1
+.venv\Scripts\python.exe api.py
+
+
+.\ngrok.exe http 8000
+
+
 🌐 **เว็บไซต์:** https://reserve-monitor-comlab.up.railway.app/
 
 ---
