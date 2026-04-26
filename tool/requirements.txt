@@ -4,6 +4,7 @@ pandas
 PyYAML
 fastapi
 uvicorn[standard]
+pyngrok
 
 # --extra-index-url https://download.pytorch.org/whl/cu130
 --extra-index-url https://download.pytorch.org/whl/cu128

@@ -19,6 +19,15 @@ PC_STATE_CSV = os.path.join(LOG_BASE_DIR, "pc_state_all.csv")
 PERF_SUMMARY_CSV = os.path.join(LOG_BASE_DIR, "performance_summary.csv")
 USER_ID_STATE_FILE = os.path.join(LOG_BASE_DIR, "user_id_state.json")
 
+# Hardcode this block to switch between local LAN serving and ngrok.
+USE_NGROK = False
+NGROK_AUTHTOKEN = ""
+NGROK_LOCAL_HOST = "127.0.0.1"
+NGROK_LOCAL_PORT = 8000
+API_HOST = "10.109.38.231"
+API_PORT = 8000
+PUBLIC_BASE_URL: Optional[str] = None
+
 PEOPLE_GLOB = os.path.join(LOG_BASE_DIR, "*", "people_with_conf_and_roi_*_*.csv")
 PC_ACTIVITY_GLOB = os.path.join(LOG_BASE_DIR, "*", "pc_activity_events_*_*.csv")
 UNATTENDED_GLOB = os.path.join(LOG_BASE_DIR, "pc_unattended_flags_*.csv")
@@ -262,11 +271,42 @@ def apply_time_sort_and_limit(df: pd.DataFrame, limit: int) -> pd.DataFrame:
     return df
 
 
+def ngrok_http_to_ws_url(public_url: str) -> str:
+    if public_url.startswith("https://"):
+        return "wss://" + public_url[len("https://") :]
+    if public_url.startswith("http://"):
+        return "ws://" + public_url[len("http://") :]
+    return public_url
+
+
+def start_ngrok_tunnel(port: int) -> Optional[str]:
+    if not USE_NGROK:
+        return None
+
+    try:
+        from pyngrok import ngrok  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError(
+            "ngrok mode is enabled, but pyngrok is not installed. Install dependencies with pip install -r tool/requirements.txt."
+        ) from exc
+
+    if NGROK_AUTHTOKEN.strip():
+        ngrok.set_auth_token(NGROK_AUTHTOKEN.strip())
+
+    tunnel = ngrok.connect(addr=port, proto="http")
+    public_url = tunnel.public_url
+    print(f"[ngrok] HTTP tunnel: {public_url}")
+    print(f"[ngrok] WS tunnel: {ngrok_http_to_ws_url(public_url)}")
+    return public_url
+
+
 @app.get("/")
 def root() -> Dict[str, Any]:
     return {
         "service": "booking-log-api",
         "log_base_dir": LOG_BASE_DIR,
+        "public_base_url": PUBLIC_BASE_URL,
+        "websocket_base_url": ngrok_http_to_ws_url(PUBLIC_BASE_URL) if PUBLIC_BASE_URL else None,
         "endpoints": [
             "/api/pc-status",
             "/api/user-ids/issue",
@@ -381,4 +421,7 @@ async def websocket_pc_updates(websocket: WebSocket):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("api:app", host="10.109.38.231", port=8000, reload=False)
+    PUBLIC_BASE_URL = start_ngrok_tunnel(API_PORT) if USE_NGROK else None
+    uvicorn_host = NGROK_LOCAL_HOST if USE_NGROK else API_HOST
+    uvicorn_port = NGROK_LOCAL_PORT if USE_NGROK else API_PORT
+    uvicorn.run(app, host=uvicorn_host, port=uvicorn_port, reload=False)

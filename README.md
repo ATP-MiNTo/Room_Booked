@@ -110,6 +110,15 @@ python tool\groundtruth_labeler.py
 
 If you omit `--video`, a file picker opens. The helper saves per-camera groundtruth CSV files under `tool\groundtruth\` using the camera label, for example `Front_left_gt.csv`.
 
+### 5) Optional ngrok mode for `api.py`
+
+Open `api.py` and change the hardcoded block near the top:
+
+- `USE_NGROK = True`
+- Set `NGROK_AUTHTOKEN` if your ngrok account requires one
+
+When enabled, the same FastAPI app is exposed through one ngrok HTTP tunnel, which also supports WebSocket clients via the matching `wss://` URL.
+
 ---
 
 ## Configuration
