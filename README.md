@@ -2,6 +2,8 @@
 
 ระบบจองที่นั่งแบบ Real-time พร้อมยืนยันตัวตนด้วยการสแกนใบหน้า และ Admin Dashboard สำหรับผู้ดูแลระบบ
 
+🌐 **เว็บไซต์:** https://reserve-monitor-comlab.up.railway.app/
+
 ---
 
 ## 🛠️ Tech Stack
@@ -12,35 +14,46 @@
 | Backend | Python FastAPI + WebSocket |
 | Database | PostgreSQL 15 |
 | Infrastructure | Docker, Docker Compose, Nginx (Reverse Proxy) |
+| Hosting | Railway |
+| Storage | Cloudinary (รูปภาพสแกนใบหน้า) |
+| Camera tunnel | ngrok |
 
 ---
 
-## ✅ Prerequisites
+## 🌐 URLs
 
-ติดตั้งก่อนเริ่มใช้งาน:
-1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) (เปิดรันไว้เบื้องหลัง)
+| หน้า | URL |
+|---|---|
+| จองที่นั่ง (นักศึกษา) | https://reserve-monitor-comlab.up.railway.app/ |
+| Admin Dashboard | https://reserve-monitor-comlab.up.railway.app/admin |
+| API Docs (Swagger) | https://reserve-monitor-comlab.up.railway.app/docs |
+
+---
+
+## ✅ Prerequisites (รันในเครื่อง)
+
+1. [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 2. Git
+3. ngrok (ถ้าต้องการเชื่อมกล้อง)
 
 ---
 
-## 🚀 วิธีรันโปรเจกต์
+## 🚀 รันในเครื่อง (Local)
 
-**1. Clone โปรเจกต์**
 ```bash
 git clone <repository-url>
-cd complab-reservation-monitoring
+cd complab-reservation
 ```
 
-**2. สร้างไฟล์ `.env`** ที่ root ของโปรเจกต์ (ดูตัวอย่างในหัวข้อถัดไป)
+สร้างไฟล์ `.env` (ดูหัวข้อถัดไป) แล้วรัน:
 
-**3. รัน Docker**
 ```bash
 docker-compose up -d --build
 ```
 
-> รอประมาณ 1–2 นาทีให้ทุก container พร้อม
+> รอ 1–2 นาทีให้ทุก container พร้อม
 
-**4. Import ฐานข้อมูล (ครั้งแรกเท่านั้น)**
+**Import ฐานข้อมูล (ครั้งแรกเท่านั้น):**
 ```bash
 docker exec -i complab_db psql -U admin -d complab_reservation_db < complab-reservation-db.session.sql
 ```
@@ -49,8 +62,6 @@ docker exec -i complab_db psql -U admin -d complab_reservation_db < complab-rese
 
 ## ⚙️ ตั้งค่า .env
 
-สร้างไฟล์ `.env` ที่ root ของโปรเจกต์ โดยมีเนื้อหาดังนี้:
-
 ```env
 POSTGRES_USER=admin
 POSTGRES_PASSWORD=your_strong_password
@@ -58,109 +69,118 @@ POSTGRES_DB=complab_reservation_db
 POSTGRES_PORT=5432
 POSTGRES_HOST=db
 JWT_SECRET_KEY=your_secret_key_here
+
+# Cloudinary
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+
+# กล้อง (ngrok) — ถ้ายังไม่มีให้เว้นว่างไว้ก่อน
+VITE_CAMERA_WS_URL=https://xxxx.ngrok-free.app
 ```
 
-> ⚠️ ไฟล์นี้เก็บ credential สำคัญ อย่า commit ขึ้น Git
+> ⚠️ อย่า commit ไฟล์นี้ขึ้น Git เด็ดขาด
 
-**สร้าง `JWT_SECRET_KEY` ด้วยคำสั่ง:**
+**สร้าง `JWT_SECRET_KEY`:**
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
-คัดลอกค่าที่ได้ไปใส่ใน `.env`
 
 ---
 
-## 🗄️ ตั้งค่าฐานข้อมูล
+## 📷 เชื่อมกล้อง (ngrok)
 
-หลัง Docker รันแล้ว import schema ด้วยคำสั่งด้านบน หรือเปิดด้วย SQLTools / DBeaver แล้วรันไฟล์ `complab-reservation-db.session.sql`
+หน้า Monitor จะรับข้อมูลจากเครื่องที่รันโค้ดกล้องผ่าน WebSocket ใช้ ngrok เป็น tunnel
 
-**ค่าเชื่อมต่อ DB (จากเครื่อง host):**
+**วิธีเชื่อม:**
 
-| Field | ค่า |
-|---|---|
-| Host | `localhost` |
-| Port | `5432` |
-| Database | `complab_reservation_db` |
-| Username | `admin` |
-| Password | ตามที่ตั้งใน `.env` |
+1. รันโค้ดกล้องในเครื่องที่ต่อกล้องไว้
+2. เปิด tunnel ด้วย ngrok:
+   ```bash
+   ./ngrok http <port-ของโค้ดกล้อง>
+   ```
+3. คัดลอก URL ที่ได้ เช่น `https://a1b2c3.ngrok-free.app`
+4. ใส่ใน 2 ที่:
+   - ไฟล์ `.env` ในเครื่อง: `VITE_CAMERA_WS_URL=https://a1b2c3.ngrok-free.app`
+   - Railway → frontend service → **Variables**: `VITE_CAMERA_WS_URL=https://a1b2c3.ngrok-free.app`
+
+> ⚠️ **ngrok free tier จะได้ URL ใหม่ทุกครั้งที่รีสตาร์ท** ต้องอัปเดต Railway Variables ทุกครั้ง  
+> ⚠️ ngrok free tier มี connection limit — ถ้าใช้งานหนักให้พิจารณา plan แบบเสียเงิน
 
 ---
 
-## 🌐 URLs
+## ☁️ Cloudinary
 
-| หน้า | URL |
-|---|---|
-| จองที่นั่ง (นักศึกษา) | http://localhost |
-| Admin Dashboard | http://localhost/admin |
-| API Docs (Swagger) | http://localhost:8000/docs |
+ระบบเก็บรูปภาพสแกนใบหน้าไว้ที่ Cloudinary
 
-### 📱 เปิดผ่าน HTTPS / มือถือ (ngrok)
+- สมัครได้ที่: https://cloudinary.com (มี free tier)
+- ดู credentials ได้ที่ Dashboard → **Cloud Name / API Key / API Secret**
+- ใส่ค่าใน `.env` และ Railway → backend service → **Variables**
 
-ระบบสแกนใบหน้าต้องการ HTTPS จึงต้องใช้ ngrok เมื่อทดสอบจากมือถือ:
+> ⚠️ Cloudinary free tier มี bandwidth และ storage จำกัด ควรตรวจสอบการใช้งานเป็นระยะ
 
-```bash
-./ngrok http 80
+---
+
+## 🚂 Deploy บน Railway
+
+### Environment Variables ที่ต้องตั้งใน Railway
+
+**Backend service:**
+```
+POSTGRES_USER
+POSTGRES_PASSWORD
+POSTGRES_DB
+POSTGRES_PORT
+POSTGRES_HOST
+JWT_SECRET_KEY
+CLOUDINARY_CLOUD_NAME
+CLOUDINARY_API_KEY
+CLOUDINARY_API_SECRET
 ```
 
-คัดลอก URL ที่ได้ (`https://xxxx.ngrok-free.dev`) ไปเปิดในมือถือ
+**Frontend service:**
+```
+VITE_CAMERA_WS_URL=https://xxxx.ngrok-free.app
+```
+
+> ⚠️ `VITE_CAMERA_WS_URL` ต้อง build ใหม่ทุกครั้งที่เปลี่ยนค่า เพราะ Vite อ่านค่าตอน build ไม่ใช่ runtime  
+> กด **Redeploy** ใน Railway หลังอัปเดต Variables ทุกครั้ง
 
 ---
 
-## 👤 เพิ่มบัญชี Admin เริ่มต้น
-
-หลัง import schema แล้ว ต้องสร้าง admin อย่างน้อย 1 บัญชีก่อนจึงจะ login ได้
-
-**วิธีที่ 1: สร้าง password hash ก่อน แล้ว INSERT เข้า DB**
+## 👤 เพิ่ม Admin เริ่มต้น
 
 ```bash
-# 1. สร้าง hash ของรหัสผ่านที่ต้องการ (เช่น "admin1234")
+# 1. สร้าง password hash
 python -c "import bcrypt; print(bcrypt.hashpw('admin1234'.encode(), bcrypt.gensalt()).decode())"
-```
 
-ได้ค่า hash ประมาณนี้:
-```
-$2b$12$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-```bash
-# 2. INSERT บัญชี admin เข้า DB
+# 2. INSERT เข้า DB
 docker exec -it complab_db psql -U admin -d complab_reservation_db -c "
 INSERT INTO admins (staff_id, first_name, last_name, department, position, username, password_hash, priority)
 VALUES ('ADM001', 'ชื่อ', 'นามสกุล', 'IT Center', 'Administrator', 'admin', '\$2b\$12\$xxx...', 1);
 "
 ```
 
-**วิธีที่ 2: ใช้ข้อมูลตัวอย่างจากโฟลเดอร์ `simu_data` (แนะนำสำหรับทดสอบ)**
-
-ดูหัวข้อถัดไป
+หรือใช้ข้อมูลจำลอง (ดูหัวข้อถัดไป)
 
 ---
 
-## 🧪 ข้อมูลจำลองสำหรับทดสอบ (simu_data)
-
-โฟลเดอร์ `simu_data/` มีข้อมูลตัวอย่างพร้อมใช้ ประกอบด้วย:
-
-- `simu_data.txt` — SQL สำหรับ insert ข้อมูลจำลองทั้งหมด (admin, นักศึกษา, การจอง, ตารางเรียน, แจ้งซ่อม)
-- `face_scanner/` — รูปภาพสแกนใบหน้าจำลอง จัดเก็บแยกตามวันที่ (56 ไฟล์)
-
-**วิธี import ข้อมูลจำลอง:**
+## 🧪 ข้อมูลจำลองสำหรับทดสอบ
 
 ```bash
-# 1. Import SQL (admin + นักศึกษา + การจอง + ตารางเรียน + แจ้งซ่อม)
+# Import SQL
 docker exec -i complab_db psql -U admin -d complab_reservation_db < simu_data/simu_data.txt
 
-# 2. คัดลอกรูปภาพจำลองเข้า container
+# คัดลอกรูปภาพจำลอง
 docker cp simu_data/face_scanner/. complab_backend:/app/../data/face_scanner/
 ```
 
-**บัญชี Admin ที่ได้จากข้อมูลจำลอง:**
+**บัญชี Admin จากข้อมูลจำลอง:**
 
 | Field | ค่า |
 |---|---|
 | Username | `admin` |
 | Password | `Admin@12345` |
-
-> หากต้องการเปลี่ยน password ให้เข้าไปแก้ในหน้า Admin → จัดการผู้ดูแลระบบ
 
 ---
 
@@ -170,98 +190,85 @@ docker cp simu_data/face_scanner/. complab_backend:/app/../data/face_scanner/
 complab-reservation/
 ├── README.md
 ├── docker-compose.yml
-├── .env                                # ⚠️ ต้องสร้างเอง (ดูหัวข้อ ตั้งค่า .env)
+├── .env                                    # ⚠️ ต้องสร้างเอง
 ├── ngrok.exe
-├── complab-reservation-db.session.sql  # SQL schema สำหรับสร้างตาราง
-│
-├── backend/                        # FastAPI
+├── complab-reservation-db.session.sql      # SQL schema สำหรับสร้างตาราง
+├── data/                                   # รูปภาพสแกนใบหน้า (สร้างอัตโนมัติ)
+├── backend/                                # FastAPI
 │   ├── Dockerfile
-│   ├── main.py                     # Entry point, mount /data static files, register routers
-│   ├── database.py                 # เชื่อมต่อ PostgreSQL ด้วย psycopg2
-│   ├── security.py                 # hash และ verify password ด้วย bcrypt, JWT
+│   ├── main.py                             # Entry point, register routers
+│   ├── database.py                         # เชื่อมต่อ PostgreSQL
+│   ├── security.py                         # bcrypt + JWT
 │   ├── requirements.txt
 │   └── routers/
-│       ├── auth.py                 # Login / logout / session ของ admin
-│       ├── booking.py              # จองที่นั่ง, ดูที่นั่งว่าง, WebSocket real-time
-│       └── system.py               # Backup, Migration, ประวัติการใช้งาน (Logs)
-│
-├── frontend/                       # React + Vite (build → static)
+│       ├── auth.py                         # Login / logout / session admin
+│       ├── booking.py                      # จองที่นั่ง, WebSocket real-time
+│       └── system.py                       # Backup, Logs, ตั้งค่าระบบ
+├── frontend/                               # React + Vite
 │   ├── Dockerfile
-│   ├── nginx-frontend.conf         # Nginx เสิร์ฟ static files พร้อม fallback index.html
+│   ├── nginx-frontend.conf
 │   ├── vite.config.js
 │   ├── index.html
 │   ├── package.json
+│   ├── dist/                               # Static files หลัง build
 │   └── src/
-│       ├── App.jsx                 # Router หลัก กำหนด path ทุกหน้า
-│       ├── main.jsx                # Entry point ของ React
+│       ├── App.jsx                         # Router หลัก
+│       ├── main.jsx
 │       ├── assets/
 │       ├── styles/
-│       │   ├── App.css             # สไตล์หลักของแอป
-│       │   ├── FaceScanner.css     # สไตล์หน้าสแกนใบหน้า
-│       │   └── index.css           # global styles
+│       │   ├── App.css
+│       │   ├── FaceScanner.css
+│       │   └── index.css
 │       ├── utils/
-│       │   ├── dateUtils.js        # ฟังก์ชันจัดการวันที่ภาษาไทย, export CSV
-│       │   └── uiConstants.js      # shared styles, ตัวเลือก major/ชั้นปี
+│       │   ├── authFetch.js
+│       │   ├── dateUtils.js                # ฟังก์ชันวันที่ภาษาไทย, export CSV
+│       │   └── uiConstants.js
 │       ├── components/
-│       │   ├── FaceScanner.jsx     # สแกนใบหน้าด้วย face-api.js ถ่ายรูปยืนยันตัวตน
-│       │   ├── ProtectedRoute.jsx  # ป้องกัน route admin ให้ login ก่อนเข้าได้
-│       │   ├── ReservationForm.jsx # ฟอร์มกรอกข้อมูลจองที่นั่ง
-│       │   ├── SeatMap.jsx         # แผนผังที่นั่ง 30 ที่นั่ง แสดงสถานะว่าง/ไม่ว่าง
-│       │   ├── TimeSelector.jsx    # dropdown เลือกช่วงเวลาจอง
+│       │   ├── FaceScanner.jsx             # สแกนใบหน้า (face-api.js)
+│       │   ├── ProtectedRoute.jsx
+│       │   ├── ReservationForm.jsx
+│       │   ├── SeatMap.jsx                 # แผนผังที่นั่ง 30 ที่
+│       │   ├── TimeSelector.jsx
 │       │   └── admin/
-│       │       ├── AdminLayout.jsx     # Layout หลัก admin มี sidebar และ header
-│       │       ├── AdminManage.jsx     # จัดการบัญชี admin (เพิ่ม/แก้ไข/ลบ)
-│       │       ├── Accordion.jsx       # component accordion ใช้ใน SystemManage
-│       │       ├── SeatGrid.jsx        # grid เลือกที่นั่ง 30 ที่ ใช้ตั้งค่าที่นั่งเสีย
-│       │       └── ThaiDatePicker.jsx  # date picker แสดงเดือน/ปีภาษาไทย
+│       │       ├── Accordion.jsx
+│       │       ├── AdminLayout.jsx         # Layout + Sidebar admin
+│       │       ├── SeatGrid.jsx
+│       │       └── ThaiDatePicker.jsx
 │       └── pages/
-│           ├── Booking.jsx             # หน้าจองที่นั่ง (นักศึกษา) เลือกเวลา/ที่นั่ง/สแกนหน้า
+│           ├── Booking.jsx                 # หน้าจองที่นั่ง (นักศึกษา)
 │           └── admin/
-│               ├── Login.jsx           # หน้า login admin
-│               ├── Monitor.jsx         # Live monitor ที่นั่ง real-time ผ่าน WebSocket
-│               ├── MonitorMock.jsx     # Monitor จำลอง สำหรับทดสอบโดยไม่ต้องมีกล้อง
-│               ├── BookingHistory.jsx  # ประวัติการจองทั้งหมด ค้นหา/กรอง/export CSV
-│               ├── StudentInfo.jsx     # ข้อมูลนักศึกษาที่เคยใช้ระบบ
-│               ├── Analytics.jsx       # สถิติและกราฟการใช้ห้อง
-│               ├── BackupRestore.jsx   # สำรองข้อมูล (.zip) และนำเข้าข้อมูล (Migration)
-│               └── SystemManage.jsx    # ตั้งค่าระบบ เช่น ตารางเรียน, ที่นั่งเสีย, จัดการ admin
-│
+│               ├── Login.jsx
+│               ├── Monitor.jsx             # Live monitor (รับข้อมูลกล้องผ่าน WebSocket)
+│               ├── MonitorMock.jsx         # Mock monitor (ไม่ต้องการกล้อง)
+│               ├── BookingHistory.jsx
+│               ├── StudentInfo.jsx
+│               ├── Analytics.jsx
+│               ├── BackupRestore.jsx
+│               ├── AdminManage.jsx
+│               └── SystemManage.jsx
 ├── nginx/
-│   └── nginx.conf                  # Reverse proxy: routing ระหว่าง frontend/backend/static
-├── data/
-│   └── face_scanner/               # รูปภาพสแกนใบหน้า จัดเก็บแยกตามวันที่ (สร้างอัตโนมัติ)
-└── simu_data/                      # ข้อมูลจำลองสำหรับทดสอบ
-    ├── simu_data.txt               # SQL insert ข้อมูลตัวอย่างทั้งหมด
-    └── face_scanner/               # รูปภาพจำลอง 56 ไฟล์ จัดเก็บแยกตามวันที่
+│   └── nginx.conf                          # Reverse proxy frontend/backend
+└── simu_data/                              # ข้อมูลจำลองสำหรับทดสอบ
 ```
 
 ---
 
 ## 📋 คำสั่งที่ใช้บ่อย
 
-**รันระบบ**
 ```bash
+# รัน
 docker-compose up -d --build
-```
 
-**หยุดระบบ**
-```bash
+# หยุด
 docker-compose down
-```
 
-**ดู logs**
-```bash
+# ดู logs
 docker-compose logs -f backend
-docker-compose logs -f frontend
-```
 
-**Backup ฐานข้อมูล**
-```bash
+# Backup DB
 docker exec complab_db pg_dump -U admin complab_reservation_db > backup.sql
-```
 
-**Reset sequence (กรณี duplicate key error)**
-```bash
+# Reset sequence (กรณี duplicate key error)
 docker exec -it complab_db psql -U admin -d complab_reservation_db -c \
   "SELECT setval('reservations_id_seq', (SELECT MAX(id) FROM reservations));"
 ```
