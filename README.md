@@ -2,18 +2,6 @@
 
 ระบบจองที่นั่งแบบ Real-time พร้อมยืนยันตัวตนด้วยการสแกนใบหน้า และ Admin Dashboard สำหรับผู้ดูแลระบบ
 
-3CXCF1otbQhXEzXBF22hIB3VPjF_7M2rSkxFRdfarVCkSjTug
-
-.\.venv\Scripts\Activate.ps1
-.venv\Scripts\python.exe threaded.py
-
-
-.\.venv\Scripts\Activate.ps1
-.venv\Scripts\python.exe api.py
-
-
-.\ngrok.exe http 8000
-
 
 🌐 **เว็บไซต์:** https://reserve-monitor-comlab.up.railway.app/
 
@@ -164,6 +152,20 @@ VITE_CAMERA_WS_URL=https://xxxx.ngrok-free.app
 ## 👤 เพิ่ม Admin เริ่มต้น
 
 ```bash
+
+3CXCF1otbQhXEzXBF22hIB3VPjF_7M2rSkxFRdfarVCkSjTug
+
+.\.venv\Scripts\Activate.ps1
+.venv\Scripts\python.exe threaded.py
+
+
+.\.venv\Scripts\Activate.ps1
+.venv\Scripts\python.exe api.py
+
+
+.\ngrok.exe http 8000
+
+
 # 1. สร้าง password hash
 python -c "import bcrypt; print(bcrypt.hashpw('admin1234'.encode(), bcrypt.gensalt()).decode())"
 
