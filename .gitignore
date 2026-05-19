@@ -21,3 +21,4 @@ logs_video_mode/eval
 logs_video_mode/report
 pc_state_all.csv
 tool/threaded_config.yaml
+performance_summary.csv
