@@ -528,6 +528,117 @@ def save_zone_roi_fallback_report_frame(
     )
 
 
+def _draw_detection_boxes(overlay, boxes, color, prefix, text_color=None):
+    if text_color is None:
+        text_color = color
+    for b in boxes or []:
+        x1, y1, x2, y2, cf = int(b[0]), int(b[1]), int(b[2]), int(b[3]), float(b[4])
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(
+            overlay,
+            f"{prefix}:{cf:.2f}",
+            (x1, max(12, y1 - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            text_color,
+            1,
+        )
+
+
+def _draw_red_outline(overlay, boxes, thickness=3):
+    for b in boxes or []:
+        x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 0, 255), thickness)
+
+
+def save_dynamic_fixed_comparison_report_frame(
+    cam_data,
+    frame,
+    frame_time_sec,
+    pc_name,
+    dynamic_boxes,
+    fixed_boxes,
+    dynamic_conf,
+    fixed_conf,
+    dynamic_iou,
+    fixed_iou,
+):
+    report_dir = cam_data.get("report_dir")
+    if not report_dir:
+        return None
+
+    opti_dir = os.path.join(report_dir, "opti_report")
+    os.makedirs(opti_dir, exist_ok=True)
+
+    ts = max(0.0, float(frame_time_sec))
+    safe_pc = to_safe_label(pc_name)
+    entry_idx = len(cam_data.setdefault("dynamic_only_detections", []))
+    base_name = f"{safe_pc}_{int(ts)}_{entry_idx}"
+    image_path = os.path.join(opti_dir, f"comparison_{base_name}.jpg")
+
+    left = frame.copy()
+    right = frame.copy()
+
+    # Left panel: dynamic result, with fixed-kept boxes highlighted for contrast.
+    _draw_detection_boxes(left, dynamic_boxes, (0, 255, 0), "dyn", (0, 255, 0))
+    _draw_red_outline(left, dynamic_boxes, 3)
+    _draw_detection_boxes(left, fixed_boxes, (255, 0, 0), "fix", (255, 0, 0))
+    cv2.putText(left, f"Comparison | dynamic", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    cv2.putText(
+        left,
+        f"PC:{pc_name}  dyn_conf={dynamic_conf:.2f}  fix_conf={fixed_conf:.2f}",
+        (12, 56),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (240, 240, 240),
+        1,
+    )
+    cv2.putText(
+        left,
+        f"dyn_iou={dynamic_iou:.2f}  fix_iou={fixed_iou:.2f}  t={format_video_clock(ts)}",
+        (12, 80),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.48,
+        (240, 240, 240),
+        1,
+    )
+
+    # Right panel: fixed result only.
+    _draw_detection_boxes(right, fixed_boxes, (255, 0, 0), "fix", (255, 0, 0))
+    _draw_red_outline(right, fixed_boxes, 3)
+    if not fixed_boxes:
+        cv2.putText(right, "fixed: no detections", (12, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+    cv2.putText(right, "Comparison | fixed", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    cv2.putText(
+        right,
+        f"PC:{pc_name}  t={format_video_clock(ts)}",
+        (12, 56),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (240, 240, 240),
+        1,
+    )
+
+    gap = np.full((left.shape[0], 24, 3), 25, dtype=np.uint8)
+    merged = np.hstack([left, gap, right])
+    footer = f"source={os.path.basename(str(cam_data.get('source_path', '')))}  reason=dynamic-kept/fixed-dropped"
+    footer_y = merged.shape[0] - 14
+    ts_label = f"t:{format_video_clock(ts)}"
+    ts_size, _ = cv2.getTextSize(ts_label, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
+    ts_x = max(12, merged.shape[1] - ts_size[0] - 16)
+    cv2.rectangle(
+        merged,
+        (max(8, ts_x - 8), max(0, footer_y - 22)),
+        (merged.shape[1] - 8, footer_y + 6),
+        (0, 0, 0),
+        -1,
+    )
+    cv2.putText(merged, footer, (12, footer_y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 1)
+    cv2.putText(merged, ts_label, (ts_x, footer_y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 255, 255), 1)
+    cv2.imwrite(image_path, merged)
+    return image_path
+
+
 def save_sudden_disappear_report_frames(
     cam_data,
     frame_before,
@@ -2396,6 +2507,50 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     kept_count = len(kept_candidates)
                     pc_people_counts[pc_name] = kept_count
                     pc_model_only_presence[pc_name] = 1 if kept_count > 0 else 0
+                    try:
+                        fixed_kept = apply_pc_nms_candidates(candidates, IOU_THRESHOLD, CONF_THRESHOLD)
+                        if len(kept_candidates) > 0 and len(fixed_kept) == 0:
+                            log = cam_data.setdefault("dynamic_only_detections", [])
+                            ts = frame_time_sec if 'frame_time_sec' in locals() else time.time()
+                            image_path = None
+                            try:
+                                image_path = save_dynamic_fixed_comparison_report_frame(
+                                    cam_data,
+                                    frame,
+                                    ts,
+                                    pc_name,
+                                    kept_candidates,
+                                    fixed_kept,
+                                    conf_threshold,
+                                    CONF_THRESHOLD,
+                                    iou_threshold,
+                                    IOU_THRESHOLD,
+                                )
+                            except Exception:
+                                image_path = None
+                            log.append(
+                                {
+                                    "time": format_video_timestamp(ts),
+                                    "clock": format_video_clock(ts),
+                                    "pc_name": pc_name,
+                                    "source": os.path.basename(str(cam_data.get("source_path", ""))),
+                                    "dynamic_conf_threshold": round(conf_threshold, 4),
+                                    "fixed_conf_threshold": round(CONF_THRESHOLD, 4),
+                                    "dynamic_iou_threshold": round(iou_threshold, 4),
+                                    "fixed_iou_threshold": round(IOU_THRESHOLD, 4),
+                                    "kept_dynamic": [
+                                        [int(b[0]), int(b[1]), int(b[2]), int(b[3]), round(float(b[4]), 4)]
+                                        for b in kept_candidates
+                                    ],
+                                    "kept_fixed": [
+                                        [int(b[0]), int(b[1]), int(b[2]), int(b[3]), round(float(b[4]), 4)]
+                                        for b in fixed_kept
+                                    ],
+                                    "image_file": image_path or "",
+                                }
+                            )
+                    except Exception:
+                        pass
 
                 cam_data["last_pc_model_only_presence"] = pc_model_only_presence
                 cam_data["last_pc_raw_conf_candidates"] = {

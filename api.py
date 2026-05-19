@@ -20,7 +20,7 @@ PERF_SUMMARY_CSV = os.path.join(LOG_BASE_DIR, "performance_summary.csv")
 USER_ID_STATE_FILE = os.path.join(LOG_BASE_DIR, "user_id_state.json")
 
 # Hardcode this block to switch between local LAN serving and ngrok.
-USE_NGROK = False
+USE_NGROK = True
 NGROK_AUTHTOKEN = ""
 NGROK_LOCAL_HOST = "127.0.0.1"
 NGROK_LOCAL_PORT = 8000

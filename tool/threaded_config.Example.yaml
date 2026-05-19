@@ -1,0 +1,172 @@
+# Camera sources for live mode.
+# CAM_INDEXES are OpenCV capture IDs; CAM_NAMES are labels used in windows/logs/ROI matching.
+CAM_INDEXES:
+  - 0
+  - 1
+  - 2
+  - 3
+
+CAM_NAMES:
+  0: Front_right
+  1: Front_left
+  2: Back_left
+  3: Back_right
+
+# Frame and display settings.
+# SHOW_WINDOWS supports: Show / Hide.
+# Window width/height only apply when SHOW_WINDOWS is Show.
+FRAME_WIDTH: 1280
+FRAME_HEIGHT: 720
+SHOW_WINDOWS: hide
+WINDOWS_WIDTH: 960
+WINDOWS_HEIGHT: 540
+
+# Detection thresholds and ROI snapshot frequency.
+CONF_THRESHOLD: 0.4
+IOU_THRESHOLD: 0.4
+CONF_THRESHOLD_MODE: dynamic
+IOU_THRESHOLD_MODE: dynamic
+SAVE_INTERVAL_SEC: 4
+PC_CONF_THRESHOLD_OVERRIDES:
+  PC1: 0.25
+  PC2: 0.25
+  PC3: 0.25
+  PC4: 0.25
+  PC5: 0.4
+  PC6: 0.25
+  PC7: 0.25
+  PC8: 0.4
+  PC9: 0.4
+  PC10: 0.4
+  PC11: 0.4
+  PC12: 0.3
+  PC13: 0.25
+  PC14: 0.25
+  PC15: 0.25
+  PC16: 0.25
+  PC17: 0.25
+  PC18: 0.25
+  PC19: 0.25
+  PC20: 0.3
+  PC21: 0.25
+  PC22: 0.5
+  PC23: 0.25
+  PC24: 0.25
+  PC25: 0.4
+  PC26: 0.45
+  PC27: 0.45
+  PC28: 0.25
+  PC29: 0.4
+  PC30: 0.45
+PC_IOU_THRESHOLD_OVERRIDES:
+  PC1: 0.4
+  PC2: 0.4
+  PC3: 0.4
+  PC4: 0.4
+  PC5: 0.4
+  PC6: 0.4
+  PC7: 0.4
+  PC8: 0.4
+  PC9: 0.4
+  PC10: 0.4
+  PC11: 0.4
+  PC12: 0.4
+  PC13: 0.4
+  PC14: 0.4
+  PC15: 0.4
+  PC16: 0.4
+  PC17: 0.4
+  PC18: 0.4
+  PC19: 0.4
+  PC20: 0.4
+  PC21: 0.4
+  PC22: 0.4
+  PC23: 0.4
+  PC24: 0.4
+  PC25: 0.4
+  PC26: 0.4
+  PC27: 0.4
+  PC28: 0.4
+  PC29: 0.4
+  PC30: 0.4
+
+# Live-mode detection schedule (24-hour local time).
+DETECTION_START_HOUR_24: 8
+DETECTION_END_HOUR_24: 18
+
+# PC/monitor ROI behavior and thresholds.
+# Dwell + monitor thresholds control computed PC state transitions.
+ENABLE_PC_ROI: true
+ENABLE_MONITOR_ROI: true
+PERSON_OVERLAP_DWELL_SEC: 10.0
+PC_ON_NO_PERSON_DWELL_SEC: 300.0
+LATEST_PERSON_FLAG_LOOKBACK_SEC: 900.0
+MONITOR_ON_MEAN_THRESHOLD: 70.0
+MONITOR_ON_STD_THRESHOLD: 12.0
+MONITOR_STATE_STABLE_FRAMES: 3
+ROI_CONFIG_DIR: tool/roi_config
+CSV_SUFFIX: _roi.csv
+MONITOR_CSV_SUFFIX: _monitor_roi.csv
+GATE_ROI_CSV_SUFFIX: _gate_roi.csv
+ENABLE_GATE_ASSIGNMENT: true
+GATE_RELINK_MAX_MISSING_SEC: 3.0
+GATE_SUDDEN_APPEAR_WINDOW_SEC: 4.0
+GATE_DISAPPEAR_ASSIGN_DWELL_SEC: 2.0
+
+# Runtime performance controls.
+# PROCESS_EVERY_N_FRAMES reduces inference load; SMOOTH_WINDOW_SEC stabilizes counters/states.
+ENABLE_RESOURCE_MONITOR: false
+PROCESS_EVERY_N_FRAMES: 2
+FRAME_CAP_FPS: 20
+TRACK_MATCH_DISTANCE_PX: 100.0
+TRACK_REID_EXPAND_PX_PER_SEC: 90.0
+TRACK_MAX_MISSING_SEC_LIVE: 10.0
+TRACK_MAX_MISSING_SEC_VIDEO: 10.0
+TRACK_STALE_FORGET_SEC: 30.0
+TRACK_VELOCITY_SMOOTHING: 0.6
+TRACK_MAX_PREDICTION_SPEED_PX_PER_SEC: 600.0
+SMOOTH_WINDOW_SEC: 5.0
+HOLD_VISUAL_MIN_SEC: 0.35
+
+# Motion gating + periodic fallback (hybrid strategy)
+# Inference runs when motion is detected OR when PERIODIC_INFER_SEC is due.
+ENABLE_MOTION_GATING: true
+MOTION_SUBTRACTOR_METHOD: MOG2
+MOTION_DETECT_SHADOWS: false
+MOTION_MIN_AREA_RATIO: 0.0025
+MOTION_MORPH_KERNEL: 3
+MOTION_BLUR_KERNEL: 5
+MOTION_WARMUP_FRAMES: 60
+PERIODIC_INFER_SEC: 1.5
+
+# BG-sub ROI refinement (short-term assist only, not long-term authority)
+ROI_MOTION_ASSIST_SEC: 1.2
+ROI_MOTION_MIN_AREA_RATIO: 0.006
+
+# Sudden disappear detection: corner margin as fraction of frame (18% = near edges).
+SUDDEN_DISAPPEAR_CORNER_MARGIN_RATIO: 0.18
+
+# Realtime aggregated PC state output.
+ENABLE_REALTIME_PC_STATE_CSV: true
+REALTIME_PC_STATE_WRITE_INTERVAL_SEC: 1.0
+
+# Live-mode model and output paths.
+MODEL_PATH: yolo26s.pt
+LOG_BASE_DIR: logs
+ROI_IMAGES_SUBDIR: roi_images
+PERF_SUMMARY_FILENAME: performance_summary.csv
+
+# Offline video mode options.
+# Video filename stems are used for per-video labels and log naming.
+VIDEO_INPUT_DIR: test_vid
+VIDEO_GLOB_PATTERNS:
+  - '*.mp4'
+  - '*.avi'
+  - '*.mov'
+  - '*.mkv'
+VIDEO_MAX_SOURCES: 4
+VIDEO_LOG_BASE_DIR: logs_video_mode
+VIDEO_ROI_IMAGES_SUBDIR: roi_images
+VIDEO_PERF_SUMMARY_FILENAME: performance_summary.csv
+VIDEO_REALTIME_PC_STATE_FILENAME: pc_state_all.csv
+VIDEO_TIME_FALLBACK_FPS: 30.0
