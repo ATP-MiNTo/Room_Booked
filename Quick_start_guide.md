@@ -49,6 +49,9 @@ Edit `tool/threaded_config.yaml` to adjust:
 - PC ROI settings
 - Detection schedule
 - Output directories
+- BG subtraction / motion gating: `ENABLE_MOTION_GATING: true` or `false`
+
+If you want to test model performance with and without background subtraction, change that value and rerun the script.
 
 ## Output Locations
 

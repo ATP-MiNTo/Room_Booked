@@ -376,7 +376,9 @@ def build_gt_occupancy_intervals(gt_lookup, pc_name, video_end_ts=None):
     if last_occupied == 1:
         if not in_interval:
             interval_start = last_sec
-        tail_end = video_end_ts if video_end_ts is not None else (last_sec + 900)
+        tail_end = last_sec + 1.0
+        if video_end_ts is not None and video_end_ts >= last_sec:
+            tail_end = max(tail_end, video_end_ts)
         intervals.append((interval_start, tail_end))
 
     return sorted(intervals)
@@ -588,7 +590,7 @@ def run_eval_only_duration(eval_log_root, groundtruth_dir, config_path=""):
 
         video_end_ts = None
         if len(detail_df) > 0:
-            video_end_ts = float(detail_df["t_sec"].iloc[-1])
+            video_end_ts = float(detail_df["t_sec"].max())
 
         detail_records = detail_df.to_dict("records")
         pc_names = sorted(detail_df["pc_name"].unique(), key=pc_name_sort_key)

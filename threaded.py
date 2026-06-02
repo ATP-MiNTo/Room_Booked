@@ -1159,6 +1159,7 @@ def build_camera_states():
             "last_motion_ratio": 0.0,
             "last_roi_motion_ts": {},
             "last_roi_motion_assist": {},
+            "motion_ratio_buffer": deque(),  # Store (timestamp, motion_ratio) for 2-sec averaging
         }
         os.makedirs(cams[cam_idx]["roi_dir"], exist_ok=True)
         os.makedirs(cams[cam_idx]["log_dir"], exist_ok=True)
@@ -1234,13 +1235,27 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                 fg_mask, motion_ratio = compute_motion_foreground(gray, cam_data.get("motion_subtractor"))
                 cam_data["last_motion_ratio"] = motion_ratio
 
+                # Add motion ratio to 2-second buffer
+                motion_buffer = cam_data.setdefault("motion_ratio_buffer", deque())
+                motion_buffer.append((frame_start, motion_ratio))
+                
+                # Remove entries older than 2 seconds
+                while motion_buffer and (frame_start - motion_buffer[0][0]) > 2.0:
+                    motion_buffer.popleft()
+                
+                # Calculate 2-second average motion ratio
+                if motion_buffer:
+                    avg_motion_ratio = sum(ratio for _, ratio in motion_buffer) / len(motion_buffer)
+                else:
+                    avg_motion_ratio = 0.0
+
                 warmup_frames = int(cam_data.get("motion_warmup_frames", 0))
                 if warmup_frames < MOTION_WARMUP_FRAMES:
                     cam_data["motion_warmup_frames"] = warmup_frames + 1
                     motion_detected = True
                 else:
                     cam_data["motion_warmup_done"] = True
-                    motion_detected = motion_ratio >= MOTION_MIN_AREA_RATIO
+                    motion_detected = avg_motion_ratio >= MOTION_MIN_AREA_RATIO
 
                 cam_data["last_roi_motion_assist"] = update_roi_motion_timestamps(
                     fg_mask,
@@ -1487,6 +1502,28 @@ def camera_thread_fn(cam_idx, cam_data, stop_event):
                     cam_data["last_annotated_frame"] = frame.copy()
             else:
                 update_smoothed_person_count(cam_data, 0, frame_start)
+
+            if ENABLE_MOTION_GATING:
+                motion_status = "YES" if detection_active and motion_detected else "NO" if detection_active else "N/A"
+                cv2.putText(
+                    frame,
+                    f"BG Sub: ON | Motion: {motion_status} | YOLO: {'RUN' if do_infer else 'SKIP'}",
+                    (20, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 255),
+                    2,
+                )
+            else:
+                cv2.putText(
+                    frame,
+                    f"BG Sub: OFF | YOLO: {'RUN' if do_infer else 'SKIP'}",
+                    (20, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 255),
+                    2,
+                )
 
             frame_end = time.time()
             latency_ms = (frame_end - frame_start) * 1000.0
